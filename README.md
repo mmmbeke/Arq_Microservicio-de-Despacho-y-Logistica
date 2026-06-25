@@ -24,6 +24,7 @@ Este repositorio contiene la implementación del **Microservicio de Despacho y L
 
 ## Arquitectura a seguir
 
+```text
 Arq_Microservicio-de-Despacho-y-Logistica/
 ├── src/
 │   ├── config/

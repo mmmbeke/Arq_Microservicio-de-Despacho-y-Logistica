@@ -1,0 +1,555 @@
+openapi: 3.0.3
+info:
+  title: Shipment Service — Grupo 8
+  version: "1.0"
+  description: |
+    Servicio de despacho y logística del ecosistema Mini Marketplace Cloud.
+    Grupo 8 — Despacho / Logística (`dispatch-service`).
+
+    **Caso crítico:** pedido pasa a despacho y entrega (`READY_TO_SHIP` → envío → `DELIVERED`).
+
+    **Integraciones acordadas (E1):**
+    - **G5 (Pedidos):** consume evento `OrderReadyToShip`; G8 enriquece con `GET /orders/{id}`.
+      G5 consume `ShipmentCreated` → `SHIPPED` y `ShipmentDelivered` → `DELIVERED`.
+    - **G9 (Notificaciones):** G8 publica eventos vía `POST /notifications/events`.
+    - **G10 (Reportería):** consulta `GET /v1/shipments` (estado logístico; complementa estado de pedido en G5).
+
+    **Caso obligatorio (idempotencia + concurrencia):**
+
+    Si llegan **dos confirmaciones** (o dos rechazos, o dos creaciones equivalentes) para el mismo
+    acto de negocio —identificado por `Idempotency-Key`— **solo la primera** debe producir efecto
+    observable en el estado del envío.
+
+    **Respuestas esperadas en reintentos / duplicados:**
+    - `200 OK` con el **mismo cuerpo** que el primer éxito (si el servicio “recuerda” el resultado
+      por clave de idempotencia; equivalente a cache de resultado en G6), **o**
+    - `409 Conflict` con código `ALREADY_PROCESSED` si el middleware/capa no cachea y detecta
+      que el acto ya fue aplicado.
+
+    **Seguridad de estado en base de datos (optimistic locking):**
+    El recurso `Shipment` expone `version` monotónica. Las transiciones sensibles deberían validar
+    `If-Match: "<version>"` (o `ETag`) para que **dos operadores concurrentes** no dejen el envío
+    en un estado ilegal. Si no coincide la versión, responde HTTP 412 Precondition Failed.
+
+    **Transiciones de estado:**
+    `CREATED` → `PICKING` → `OUT_FOR_DELIVERY` → `DELIVERED` | `FAILED`
+
+    **Stack acordado (implementación E2+):**
+    - Backend: Node.js + TypeScript
+    - Base de datos: Supabase PostgreSQL
+    - Documentación: OpenAPI / Swagger
+    - Eventos hacia G9: REST (`POST /notifications/events`)
+    - Datos hacia G10: REST (`GET /v1/shipments`)
+    - Deploy: Render (plan free)
+  contact:
+    name: Grupo 8 — Despacho y logística
+    email: grupo8@example.edu
+
+servers:
+  - url: http://localhost:3007
+    description: Desarrollo local (Node.js)
+  - url: https://api-grupo8.onrender.com
+    description: Producción / mock público (placeholder)
+
+tags:
+  - name: Shipments
+    description: Envíos (shipments) y transiciones idempotentes
+
+paths:
+  /v1/shipments:
+    post:
+      tags: [Shipments]
+      summary: Crear envío para un pedido listo para despacho
+      description: |
+        Crea un envío cuando G5 publica `OrderReadyToShip` (pedido en `READY_TO_SHIP`).
+        G8 obtiene dirección e ítems desde `GET /orders/{orderId}` en G5 y persiste snapshot en el envío.
+        Tras crear, publica evento `ShipmentCreated` hacia G9 y G5 actualiza el pedido a `SHIPPED`.
+      operationId: createShipment
+      parameters:
+        - $ref: "#/components/parameters/XCorrelationId"
+        - $ref: "#/components/parameters/XConsumer"
+        - $ref: "#/components/parameters/IdempotencyKeyUuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShipmentRequest"
+      responses:
+        "201":
+          description: Envío creado
+          headers:
+            Location:
+              schema: { type: string }
+            ETag:
+              schema: { type: string }
+              description: ETag del recurso (derivado de `version`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "200":
+          description: >
+            Reintento idempotente con la misma `Idempotency-Key` y mismo payload compatible:
+            devolver el envío ya creado (misma semántica que G6 con cache de resultado).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Conflicto (duplicado lógico / ya procesado / pedido ya tiene envío)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                alreadyProcessed:
+                  value:
+                    timestamp: "2026-06-15T14:32:10Z"
+                    status: 409
+                    code: ALREADY_PROCESSED
+                    message: Esta clave de idempotencia ya fue usada con otro payload o acto incompatible.
+                    correlationId: abc-123
+                shipmentExists:
+                  value:
+                    timestamp: "2026-06-15T14:32:10Z"
+                    status: 409
+                    code: SHIPMENT_ALREADY_EXISTS
+                    message: Ya existe un envío para este pedido.
+                    correlationId: abc-123
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+    get:
+      tags: [Shipments]
+      summary: Listar envíos
+      description: |
+        Lista paginada de envíos. **Integración G10 (Reportería):** consulta estado logístico
+        del despacho; complementa el estado del pedido obtenido desde G5.
+        Usar header `X-Consumer: reporting-service`.
+      operationId: listShipments
+      parameters:
+        - $ref: "#/components/parameters/XCorrelationId"
+        - $ref: "#/components/parameters/XConsumer"
+        - name: orderId
+          in: query
+          schema: { type: string }
+          description: Filtrar por pedido asociado
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ShipmentStatus"
+          description: Filtrar por estado logístico (útil para reportes G10)
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipmentPage"
+
+  /v1/shipments/{shipmentId}:
+    get:
+      tags: [Shipments]
+      summary: Obtener envío por id
+      description: |
+        Retorna detalle del envío. Consumido por G10 para reportes de despacho.
+      operationId: getShipmentById
+      parameters:
+        - $ref: "#/components/parameters/XCorrelationId"
+        - $ref: "#/components/parameters/XConsumer"
+        - $ref: "#/components/parameters/ShipmentId"
+      responses:
+        "200":
+          description: OK
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      tags: [Shipments]
+      summary: Actualizar estado (modo general; preferir POST confirm/reject para idempotencia fuerte)
+      description: |
+        Avanza el estado logístico. Transiciones válidas:
+        `CREATED` → `PICKING` → `OUT_FOR_DELIVERY` → `DELIVERED` | `FAILED`.
+
+        Al pasar a `PICKING` o `OUT_FOR_DELIVERY`, publica `ShipmentPicking` o `ShipmentOutForDelivery` hacia G9.
+      operationId: patchShipmentStatus
+      parameters:
+        - $ref: "#/components/parameters/XCorrelationId"
+        - $ref: "#/components/parameters/ShipmentId"
+        - $ref: "#/components/parameters/IfMatchOptional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchShipmentStatusRequest"
+      responses:
+        "200":
+          description: Estado actualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Transición inválida o conflicto de negocio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+  /v1/shipments/{shipmentId}/confirm:
+    post:
+      tags: [Shipments]
+      summary: Confirmar entrega (idempotente) — análogo a `POST /payments/:id/confirm` del G6
+      description: >
+        Transición idempotente hacia `DELIVERED` cuando el envío está en `OUT_FOR_DELIVERY`.
+        Publica `ShipmentDelivered` hacia G9; G5 consume el evento y pasa el pedido a `DELIVERED`.
+        Reintento con la misma `Idempotency-Key` debe responder `200` con el mismo resultado o `409 ALREADY_PROCESSED`.
+      operationId: confirmShipmentDelivered
+      parameters:
+        - $ref: "#/components/parameters/XCorrelationId"
+        - $ref: "#/components/parameters/ShipmentId"
+        - $ref: "#/components/parameters/IdempotencyKeyUuid"
+        - $ref: "#/components/parameters/IfMatchOptional"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmShipmentRequest"
+      responses:
+        "200":
+          description: Confirmación aplicada (o reintento idempotente exitoso)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Ya procesado / estado no permite confirmar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /v1/shipments/{shipmentId}/reject:
+    post:
+      tags: [Shipments]
+      summary: Rechazar / fallar envío (idempotente) — análogo a `POST /payments/:id/reject` del G6
+      description: >
+        Transición idempotente hacia `FAILED` desde estados no terminales permitidos.
+        Publica `ShipmentFailed` hacia G9.
+      operationId: rejectShipment
+      parameters:
+        - $ref: "#/components/parameters/XCorrelationId"
+        - $ref: "#/components/parameters/ShipmentId"
+        - $ref: "#/components/parameters/IdempotencyKeyUuid"
+        - $ref: "#/components/parameters/IfMatchOptional"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectShipmentRequest"
+      responses:
+        "200":
+          description: Rechazo aplicado (o reintento idempotente exitoso)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Ya procesado / transición no permitida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+components:
+  parameters:
+    ShipmentId:
+      name: shipmentId
+      in: path
+      required: true
+      schema:
+        type: string
+
+    XCorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+
+    XConsumer:
+      name: X-Consumer
+      in: header
+      required: false
+      schema:
+        type: string
+      description: "Servicio consumidor. Ejemplos: order-service (G5), reporting-service (G10)."
+      example: reporting-service
+
+    IdempotencyKeyUuid:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID v4.
+
+    IfMatchOptional:
+      name: If-Match
+      in: header
+      required: false
+      schema:
+        type: string
+      description: "ETag o valor de version esperado (ej. 3). Si no coincide con Shipment.version, responde HTTP 412."
+
+  schemas:
+    ShipmentStatus:
+      type: string
+      enum: [CREATED, PICKING, OUT_FOR_DELIVERY, DELIVERED, FAILED]
+
+    ShipmentLine:
+      type: object
+      required: [sku, qty]
+      properties:
+        sku: { type: string }
+        qty: { type: integer, minimum: 1 }
+        description: { type: string }
+
+    Address:
+      type: object
+      required: [fullName, addressLine1, city, country]
+      properties:
+        fullName: { type: string }
+        addressLine1: { type: string }
+        addressLine2: { type: string }
+        city: { type: string }
+        region: { type: string }
+        postalCode: { type: string }
+        country: { type: string, minLength: 2, maxLength: 2 }
+
+    CreateShipmentRequest:
+      type: object
+      required: [orderId]
+      description: |
+        `orderId` referencia el pedido en G5 (`READY_TO_SHIP`).
+        `userId`, `shipTo` y `lines` se obtienen de G5 al procesar `OrderReadyToShip`.
+      properties:
+        orderId: { type: string, example: "ORD-1001" }
+        notes: { type: string, maxLength: 500 }
+
+    Shipment:
+      type: object
+      required: [shipmentId, orderId, userId, status, lines, shipTo, createdAt, updatedAt, version]
+      properties:
+        shipmentId: { type: string, example: "shp_a1b2c3" }
+        orderId: { type: string, example: "ORD-1001" }
+        userId:
+          type: string
+          description: Usuario destinatario (requerido para eventos hacia G9)
+          example: "USR-01"
+        status:
+          $ref: "#/components/schemas/ShipmentStatus"
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/ShipmentLine" }
+        shipTo:
+          $ref: "#/components/schemas/Address"
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        deliveredAt: { type: string, format: date-time, nullable: true }
+        proof:
+          type: object
+          nullable: true
+        version:
+          type: integer
+          minimum: 1
+          description: Versión monotónica para optimistic locking (If-Match).
+
+    PatchShipmentStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/ShipmentStatus"
+        proof:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [SIMULATED_SIGNATURE, PHOTO_URL, NONE]
+            reference: { type: string }
+
+    ConfirmShipmentRequest:
+      type: object
+      properties:
+        proof:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [SIMULATED_SIGNATURE, PHOTO_URL, NONE]
+            reference: { type: string }
+
+    RejectShipmentRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+
+    ShipmentPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Shipment" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+
+    ErrorResponse:
+      type: object
+      required: [timestamp, status, code, message, correlationId]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        code:
+          type: string
+        message:
+          type: string
+        correlationId:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Solicitud inválida
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            timestamp: "2026-06-15T14:32:10Z"
+            status: 400
+            code: INVALID_REQUEST
+            message: La solicitud es inválida.
+            correlationId: abc-123
+    NotFound:
+      description: No existe el envío
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            timestamp: "2026-06-15T14:32:10Z"
+            status: 404
+            code: SHIPMENT_NOT_FOUND
+            message: No existe el envío solicitado.
+            correlationId: abc-123
+    Unprocessable:
+      description: Regla de negocio / precondición de integración
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            timestamp: "2026-06-15T14:32:10Z"
+            status: 422
+            code: ORDER_NOT_READY_LOCALLY
+            message: No hay snapshot de pedido listo para despacho.
+            correlationId: abc-123
+    PreconditionFailed:
+      description: If-Match / versión no coincide (optimistic locking)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            timestamp: "2026-06-15T14:32:10Z"
+            status: 412
+            code: PRECONDITION_FAILED
+            message: La versión del envío no coincide con If-Match.
+            correlationId: abc-123
+    ServerError:
+      description: Error interno
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            timestamp: "2026-06-15T14:32:10Z"
+            status: 500
+            code: INTERNAL_ERROR
+            message: Error interno del servidor.
+            correlationId: abc-123
+
+# ─────────────────────────────────────────────
+# EVENTOS (documentación, no parte de OpenAPI)
+# ─────────────────────────────────────────────
+# CONSUME (desde G5):
+#   OrderReadyToShip → G8 crea envío; enriquece con GET /orders/{orderId}
+#
+# PUBLICA (vía REST a G9 — POST /notifications/events):
+#   ShipmentCreated          → al crear envío (POST /v1/shipments); G5 → SHIPPED
+#   ShipmentPicking          → transición a PICKING
+#   ShipmentOutForDelivery   → transición a OUT_FOR_DELIVERY
+#   ShipmentDelivered        → POST /v1/shipments/{id}/confirm; G5 → DELIVERED
+#   ShipmentFailed           → POST /v1/shipments/{id}/reject
+#
+# CONSUMIDORES REST (G10):
+#   GET /v1/shipments — estado logístico (complementa estado de pedido en G5)
+#
+# Formato estándar de evento (alineado a G5/G9):
+# {
+#   "eventId":       "uuid",
+#   "eventType":     "ShipmentDelivered",
+#   "version":       "1.0",
+#   "occurredAt":    "2026-05-25T10:00:00Z",
+#   "producer":      "dispatch-service",
+#   "correlationId": "abc-123",
+#   "payload": {
+#     "userId":      "USR-01",
+#     "orderId":     "ORD-1001",
+#     "shipmentId":  "shp_a1b2c3",
+#     "status":      "DELIVERED"
+#   }
+# }

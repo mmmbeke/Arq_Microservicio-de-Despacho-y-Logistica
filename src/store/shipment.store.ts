@@ -1,4 +1,4 @@
-import { getSupabase } from '../config/supabase';
+import { getSupabase, hasSupabaseEnv } from '../config/supabase';
 import { Shipment, ShipmentStatus } from '../types/shipment.types';
 
 const shipments = new Map<string, Shipment>();
@@ -37,12 +37,14 @@ interface IdempotencyRow {
   status_code: number;
 }
 
+let activePersistence: 'supabase' | 'memory' = 'memory';
+
 export function isSupabaseEnabled(): boolean {
-  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return activePersistence === 'supabase';
 }
 
 export function getPersistenceMode(): 'supabase' | 'memory' {
-  return isSupabaseEnabled() ? 'supabase' : 'memory';
+  return activePersistence;
 }
 
 function rowToShipment(row: ShipmentRow): Shipment {
@@ -157,7 +159,14 @@ export function cloneShipment(shipment: Shipment): Shipment {
 }
 
 export async function initStore(): Promise<void> {
-  if (isSupabaseEnabled()) {
+  if (!hasSupabaseEnv()) {
+    console.warn('[store] Persistencia: memoria (configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY)');
+    activePersistence = 'memory';
+    seedMemory();
+    return;
+  }
+
+  try {
     console.log('[store] Persistencia: Supabase (PostgreSQL)');
     const supabase = getSupabase();
     const { count, error } = await supabase
@@ -165,17 +174,17 @@ export async function initStore(): Promise<void> {
       .select('*', { count: 'exact', head: true });
 
     if (error) {
-      console.error('[store] Error conectando a Supabase:', error.message);
-      console.warn('[store] Verifica que ejecutaste docs/schema.sql en Supabase');
-      return;
+      throw new Error(error.message);
     }
 
+    activePersistence = 'supabase';
     console.log(`[store] Supabase OK — ${count ?? 0} envíos en BD`);
-    return;
+  } catch (err) {
+    activePersistence = 'memory';
+    console.error('[store] Error conectando a Supabase:', err);
+    console.warn('[store] Usando memoria como respaldo. Revisa variables en Render y la Secret key.');
+    seedMemory();
   }
-
-  console.warn('[store] Persistencia: memoria (configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY)');
-  seedMemory();
 }
 
 export function isValidTransition(from: ShipmentStatus, to: ShipmentStatus): boolean {

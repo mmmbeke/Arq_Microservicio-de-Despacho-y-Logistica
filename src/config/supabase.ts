@@ -1,20 +1,34 @@
 import 'dotenv/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+function readEnv(name: string): string {
+  return (process.env[name] ?? '').trim();
+}
+
+const supabaseUrl = readEnv('SUPABASE_URL');
+const supabaseServiceRoleKey = readEnv('SUPABASE_SERVICE_ROLE_KEY');
 
 let client: SupabaseClient | null = null;
 
-if (supabaseUrl && supabaseServiceRoleKey) {
-  client = createClient(supabaseUrl, supabaseServiceRoleKey);
-} else {
-  console.warn('[supabase] Faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en el .env');
+export function hasSupabaseEnv(): boolean {
+  return Boolean(supabaseUrl && supabaseServiceRoleKey);
+}
+
+function buildClient(): SupabaseClient {
+  return createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
 }
 
 export function getSupabase(): SupabaseClient {
+  if (!hasSupabaseEnv()) {
+    throw new Error('Faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY');
+  }
   if (!client) {
-    throw new Error('Supabase no está configurado. Revisa SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en .env');
+    client = buildClient();
   }
   return client;
 }

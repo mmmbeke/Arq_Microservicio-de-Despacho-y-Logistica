@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 function readEnv(name: string): string {
   return (process.env[name] ?? '').trim();
@@ -19,6 +20,10 @@ function buildClient(): SupabaseClient {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+    },
+    realtime: {
+      // Node.js 20 (Docker/Render) no trae WebSocket nativo
+      transport: ws as unknown as typeof WebSocket,
     },
   });
 }

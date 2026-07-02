@@ -12,6 +12,7 @@ function parseStatus(value: unknown): ShipmentStatus | undefined {
   const allowed: ShipmentStatus[] = [
     'CREATED',
     'PICKING',
+    'ASSIGNED',
     'OUT_FOR_DELIVERY',
     'DELIVERED',
     'FAILED',
@@ -131,6 +132,27 @@ export const rejectShipment = async (req: Request, res: Response) => {
 
     res
       .status(200)
+      .set('ETag', shipmentService.toEtag(result.shipment.version))
+      .json(result.shipment);
+  } catch (error) {
+    handleControllerError(res, error, correlationId);
+  }
+};
+
+export const reshipShipment = async (req: Request, res: Response) => {
+  const correlationId = getCorrelationId(req.header('X-Correlation-Id'));
+
+  try {
+    const result = await shipmentService.reshipShipment(
+      paramId(req),
+      req.body,
+      req.header('Idempotency-Key'),
+      correlationId
+    );
+
+    res
+      .status(result.statusCode)
+      .set('Location', `/v1/shipments/${result.shipment.shipmentId}`)
       .set('ETag', shipmentService.toEtag(result.shipment.version))
       .json(result.shipment);
   } catch (error) {

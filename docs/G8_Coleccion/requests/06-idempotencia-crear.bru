@@ -1,0 +1,32 @@
+meta {
+  name: 06 Idempotencia crear (reintento)
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/v1/shipments
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+  Idempotency-Key: idem-create-ord-1006-001
+}
+
+body:json {
+  {
+    "orderId": "ORD-1006"
+  }
+}
+
+tests {
+  test("reintento idempotente 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("mismo shipmentId que el create", function() {
+    expect(res.body.shipmentId).to.equal(bru.getVar("createdShipmentId"));
+  });
+}

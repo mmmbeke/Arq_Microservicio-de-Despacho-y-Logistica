@@ -1,0 +1,33 @@
+meta {
+  name: 11 Rechazar envio
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{base_url}}/v1/shipments/shp_b2c3d4/reject
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+  Idempotency-Key: idem-reject-001
+  If-Match: {{etagReject}}
+}
+
+body:json {
+  {
+    "reason": "Cliente no disponible"
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("estado FAILED", function() {
+    expect(res.body.status).to.equal("FAILED");
+  });
+}

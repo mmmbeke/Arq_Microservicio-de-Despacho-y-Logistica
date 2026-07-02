@@ -1,6 +1,7 @@
 export type ShipmentStatus =
   | 'CREATED'
   | 'PICKING'
+  | 'ASSIGNED'
   | 'OUT_FOR_DELIVERY'
   | 'DELIVERED'
   | 'FAILED';
@@ -28,6 +29,9 @@ export interface Shipment {
   status: ShipmentStatus;
   lines: ShipmentLine[];
   shipTo: Address;
+  driverId?: string | null;
+  driverName?: string | null;
+  reshipOf?: string | null;
   createdAt: string;
   updatedAt: string;
   deliveredAt?: string | null;
@@ -49,6 +53,8 @@ export interface CreateShipmentRequest {
 
 export interface PatchShipmentStatusRequest {
   status: ShipmentStatus;
+  driverId?: string;
+  driverName?: string;
   proof?: {
     type?: 'SIMULATED_SIGNATURE' | 'PHOTO_URL' | 'NONE';
     reference?: string;
@@ -66,6 +72,10 @@ export interface RejectShipmentRequest {
   reason?: string;
 }
 
+export interface ReshipRequest {
+  reason?: string;
+}
+
 export interface ErrorResponse {
   timestamp: string;
   status: number;
@@ -77,9 +87,11 @@ export interface ErrorResponse {
 export type DispatchEventType =
   | 'ShipmentCreated'
   | 'ShipmentPicking'
+  | 'ShipmentAssigned'
   | 'ShipmentOutForDelivery'
   | 'ShipmentDelivered'
-  | 'ShipmentFailed';
+  | 'ShipmentFailed'
+  | 'ShipmentReshipRequested';
 
 export interface DomainEvent {
   eventId: string;
@@ -94,5 +106,9 @@ export interface DomainEvent {
     shipmentId: string;
     status: ShipmentStatus;
     reason?: string;
+    originalOrderId?: string;
+    originalShipmentId?: string;
+    driverId?: string;
+    driverName?: string;
   };
 }

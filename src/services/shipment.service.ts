@@ -4,13 +4,14 @@ import {
   CreateShipmentRequest,
   PatchShipmentStatusRequest,
   RejectShipmentRequest,
+  ReshipRequest,
   Shipment,
   ShipmentPage,
   ShipmentStatus,
 } from '../types/shipment.types';
 import { AppError } from '../utils/errors';
-import { fetchOrderSnapshot } from './order.client';
-import { publishShipmentEvent } from './notification.publisher';
+import { createRetryOrderFromFailed, fetchOrderSnapshot } from './order.client';
+import { publishReshipRequested, publishShipmentEvent } from './notification.publisher';
 import {
   getIdempotencyEntry,
   getShipmentById,
@@ -69,7 +70,11 @@ async function applyStatusChange(
   shipment: Shipment,
   nextStatus: ShipmentStatus,
   correlationId: string,
-  proof?: Record<string, unknown> | null
+  options?: {
+    proof?: Record<string, unknown> | null;
+    driverId?: string | null;
+    driverName?: string | null;
+  }
 ): Promise<Shipment> {
   if (!isValidTransition(shipment.status, nextStatus)) {
     throw new AppError(
@@ -86,8 +91,10 @@ async function applyStatusChange(
     status: nextStatus,
     updatedAt: now,
     version: shipment.version + 1,
-    proof: proof ?? shipment.proof ?? null,
+    proof: options?.proof ?? shipment.proof ?? null,
     deliveredAt: nextStatus === 'DELIVERED' ? now : shipment.deliveredAt ?? null,
+    driverId: options?.driverId !== undefined ? options.driverId : shipment.driverId ?? null,
+    driverName: options?.driverName !== undefined ? options.driverName : shipment.driverName ?? null,
   };
 
   return saveShipment(updated);
@@ -142,7 +149,7 @@ export async function createShipment(
     if (!shipment) {
       throw new AppError(500, 'INTERNAL_ERROR', 'Inconsistencia en cache de idempotencia.', correlationId);
     }
-    return { shipment, statusCode: cached.statusCode as 200 | 201, isRetry: true };
+    return { shipment, statusCode: 200, isRetry: true };
   }
 
   const existing = await getShipmentByOrderId(body.orderId);
@@ -186,6 +193,9 @@ export async function createShipment(
     updatedAt: now,
     deliveredAt: null,
     proof: null,
+    driverId: null,
+    driverName: null,
+    reshipOf: null,
     version: 1,
   });
 
@@ -208,7 +218,20 @@ export async function patchShipment(
     throw new AppError(400, 'INVALID_REQUEST', 'El campo status es requerido.', correlationId);
   }
 
-  const updated = await applyStatusChange(shipment, body.status, correlationId, body.proof ?? null);
+  if (body.status === 'ASSIGNED' && !body.driverId?.trim()) {
+    throw new AppError(
+      400,
+      'INVALID_REQUEST',
+      'El campo driverId es requerido al asignar repartidor.',
+      correlationId
+    );
+  }
+
+  const updated = await applyStatusChange(shipment, body.status, correlationId, {
+    proof: body.proof ?? null,
+    driverId: body.status === 'ASSIGNED' ? body.driverId!.trim() : undefined,
+    driverName: body.driverName?.trim() ?? undefined,
+  });
   await publishShipmentEvent(updated, correlationId);
   return updated;
 }
@@ -248,7 +271,9 @@ export async function confirmShipment(
     );
   }
 
-  const updated = await applyStatusChange(shipment, 'DELIVERED', correlationId, body?.proof ?? null);
+  const updated = await applyStatusChange(shipment, 'DELIVERED', correlationId, {
+    proof: body?.proof ?? null,
+  });
   await setIdempotencyEntry(`confirm:${key}`, payloadHash, shipmentId, 200);
   await publishShipmentEvent(updated, correlationId);
 
@@ -281,7 +306,7 @@ export async function rejectShipment(
     return { shipment, isRetry: true };
   }
 
-  if (!['CREATED', 'PICKING', 'OUT_FOR_DELIVERY'].includes(shipment.status)) {
+  if (!['CREATED', 'PICKING', 'ASSIGNED', 'OUT_FOR_DELIVERY'].includes(shipment.status)) {
     throw new AppError(
       409,
       'INVALID_STATUS_TRANSITION',
@@ -290,11 +315,89 @@ export async function rejectShipment(
     );
   }
 
-  const updated = await applyStatusChange(shipment, 'FAILED', correlationId, null);
+  const updated = await applyStatusChange(shipment, 'FAILED', correlationId, { proof: null });
   await setIdempotencyEntry(`reject:${key}`, payloadHash, shipmentId, 200);
   await publishShipmentEvent(updated, correlationId, body?.reason);
 
   return { shipment: updated, isRetry: false };
+}
+
+export async function reshipShipment(
+  shipmentId: string,
+  body: ReshipRequest | undefined,
+  idempotencyKey: string | undefined,
+  correlationId: string
+): Promise<{ shipment: Shipment; statusCode: 200 | 201; isRetry: boolean }> {
+  const key = requireIdempotencyKey(idempotencyKey, correlationId);
+  const payloadHash = hashPayload({ action: 'reship', shipmentId, body });
+  const cached = await getIdempotencyEntry(`reship:${key}`);
+
+  if (cached) {
+    if (cached.payloadHash !== payloadHash) {
+      throw new AppError(
+        409,
+        'ALREADY_PROCESSED',
+        'Este reenvío ya fue procesado con otro payload.',
+        correlationId
+      );
+    }
+    return {
+      shipment: await getShipmentOrThrow(cached.shipmentId, correlationId),
+      statusCode: 200,
+      isRetry: true,
+    };
+  }
+
+  const original = await getShipmentOrThrow(shipmentId, correlationId);
+
+  if (original.status !== 'FAILED') {
+    throw new AppError(
+      409,
+      'INVALID_STATUS_TRANSITION',
+      'Solo se puede reenviar un envío en estado FAILED.',
+      correlationId
+    );
+  }
+
+  const retryOrder = await createRetryOrderFromFailed(original.orderId, {
+    userId: original.userId,
+    lines: original.lines,
+    shipTo: original.shipTo,
+  });
+
+  const existing = await getShipmentByOrderId(retryOrder.orderId);
+  if (existing) {
+    throw new AppError(
+      409,
+      'SHIPMENT_ALREADY_EXISTS',
+      'Ya existe un envío para el pedido de reintento.',
+      correlationId
+    );
+  }
+
+  const now = new Date().toISOString();
+  const newShipment = await saveShipment({
+    shipmentId: nextShipmentId(),
+    orderId: retryOrder.orderId,
+    userId: retryOrder.userId,
+    status: 'CREATED',
+    lines: retryOrder.lines,
+    shipTo: retryOrder.shipTo,
+    driverId: null,
+    driverName: null,
+    reshipOf: original.shipmentId,
+    createdAt: now,
+    updatedAt: now,
+    deliveredAt: null,
+    proof: null,
+    version: 1,
+  });
+
+  await setIdempotencyEntry(`reship:${key}`, payloadHash, newShipment.shipmentId, 201);
+  await publishReshipRequested(original, newShipment, correlationId, body?.reason);
+  await publishShipmentEvent(newShipment, correlationId);
+
+  return { shipment: newShipment, statusCode: 201, isRetry: false };
 }
 
 export function toEtag(version: number): string {

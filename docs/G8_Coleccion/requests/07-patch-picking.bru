@@ -1,0 +1,38 @@
+meta {
+  name: 07 PATCH estado PICKING
+  type: http
+  seq: 7
+}
+
+patch {
+  url: {{base_url}}/v1/shipments/shp_b2c3d4
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+  If-Match: "1"
+}
+
+body:json {
+  {
+    "status": "PICKING"
+  }
+}
+
+script:post-response {
+  if (res.status === 200) {
+    bru.setVar("etagAssigned", '"' + res.body.version + '"');
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("estado PICKING", function() {
+    expect(res.body.status).to.equal("PICKING");
+  });
+}

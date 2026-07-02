@@ -1,0 +1,23 @@
+meta {
+  name: 02 Listar envios
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/v1/shipments
+}
+
+headers {
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("tiene items", function() {
+    expect(res.body.items).to.be.an("array");
+  });
+}

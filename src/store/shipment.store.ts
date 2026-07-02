@@ -10,7 +10,8 @@ const idempotencyCache = new Map<
 
 export const VALID_TRANSITIONS: Record<ShipmentStatus, ShipmentStatus[]> = {
   CREATED: ['PICKING', 'FAILED'],
-  PICKING: ['OUT_FOR_DELIVERY', 'FAILED'],
+  PICKING: ['ASSIGNED', 'FAILED'],
+  ASSIGNED: ['OUT_FOR_DELIVERY', 'FAILED'],
   OUT_FOR_DELIVERY: ['DELIVERED', 'FAILED'],
   DELIVERED: [],
   FAILED: [],
@@ -24,6 +25,9 @@ interface ShipmentRow {
   lines: Shipment['lines'];
   ship_to: Shipment['shipTo'];
   proof: Shipment['proof'];
+  driver_id: string | null;
+  driver_name: string | null;
+  reship_of: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -55,6 +59,9 @@ function rowToShipment(row: ShipmentRow): Shipment {
     status: row.status,
     lines: row.lines,
     shipTo: row.ship_to,
+    driverId: row.driver_id ?? null,
+    driverName: row.driver_name ?? null,
+    reshipOf: row.reship_of ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deliveredAt: row.delivered_at,
@@ -72,6 +79,9 @@ function shipmentToRow(shipment: Shipment): ShipmentRow {
     lines: shipment.lines,
     ship_to: shipment.shipTo,
     proof: shipment.proof ?? null,
+    driver_id: shipment.driverId ?? null,
+    driver_name: shipment.driverName ?? null,
+    reship_of: shipment.reshipOf ?? null,
     version: shipment.version,
     created_at: shipment.createdAt,
     updated_at: shipment.updatedAt,
@@ -102,6 +112,9 @@ function baseShipment(partial: Partial<Shipment> & Pick<Shipment, 'shipmentId' |
     updatedAt: partial.updatedAt ?? now,
     deliveredAt: partial.deliveredAt ?? null,
     proof: partial.proof ?? null,
+    driverId: partial.driverId ?? null,
+    driverName: partial.driverName ?? null,
+    reshipOf: partial.reshipOf ?? null,
     version: partial.version ?? 1,
   };
 }

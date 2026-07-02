@@ -1,0 +1,23 @@
+meta {
+  name: 04 Error 404 envio no existe
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/v1/shipments/no-existe
+}
+
+headers {
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+}
+
+tests {
+  test("status 404", function() {
+    expect(res.status).to.equal(404);
+  });
+  test("codigo SHIPMENT_NOT_FOUND", function() {
+    expect(res.body.code).to.equal("SHIPMENT_NOT_FOUND");
+  });
+}

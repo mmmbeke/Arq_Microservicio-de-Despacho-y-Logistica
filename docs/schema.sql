@@ -5,10 +5,13 @@ CREATE TABLE IF NOT EXISTS shipments (
   shipment_id   TEXT PRIMARY KEY,
   order_id      TEXT UNIQUE NOT NULL,
   user_id       TEXT NOT NULL,
-  status        TEXT NOT NULL CHECK (status IN ('CREATED', 'PICKING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'FAILED')),
+  status        TEXT NOT NULL CHECK (status IN ('CREATED', 'PICKING', 'ASSIGNED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'FAILED')),
   lines         JSONB NOT NULL DEFAULT '[]',
   ship_to       JSONB NOT NULL,
   proof         JSONB,
+  driver_id     TEXT,
+  driver_name   TEXT,
+  reship_of     TEXT,
   version       INTEGER NOT NULL DEFAULT 1,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -25,3 +28,11 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 
 CREATE INDEX IF NOT EXISTS idx_shipments_status ON shipments(status);
 CREATE INDEX IF NOT EXISTS idx_shipments_order_id ON shipments(order_id);
+
+-- Migración para proyectos ya creados (ejecutar si la tabla ya existía)
+ALTER TABLE shipments DROP CONSTRAINT IF EXISTS shipments_status_check;
+ALTER TABLE shipments ADD CONSTRAINT shipments_status_check
+  CHECK (status IN ('CREATED', 'PICKING', 'ASSIGNED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'FAILED'));
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS driver_id TEXT;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS driver_name TEXT;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS reship_of TEXT;

@@ -1,0 +1,38 @@
+meta {
+  name: 09 PATCH OUT_FOR_DELIVERY
+  type: http
+  seq: 9
+}
+
+patch {
+  url: {{base_url}}/v1/shipments/shp_b2c3d4
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+  If-Match: {{etagOutForDelivery}}
+}
+
+body:json {
+  {
+    "status": "OUT_FOR_DELIVERY"
+  }
+}
+
+script:post-response {
+  if (res.status === 200) {
+    bru.setVar("etagReject", '"' + res.body.version + '"');
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("estado OUT_FOR_DELIVERY", function() {
+    expect(res.body.status).to.equal("OUT_FOR_DELIVERY");
+  });
+}

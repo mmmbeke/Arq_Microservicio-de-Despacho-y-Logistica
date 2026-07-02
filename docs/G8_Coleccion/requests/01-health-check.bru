@@ -1,0 +1,23 @@
+meta {
+  name: 01 Health check
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/health
+}
+
+headers {
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("persistencia supabase o memory", function() {
+    expect(res.body.persistence).to.be.oneOf(["supabase", "memory"]);
+  });
+}

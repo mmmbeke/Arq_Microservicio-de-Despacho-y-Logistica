@@ -78,9 +78,11 @@ Respuesta esperada:
 ## Base de datos (Supabase)
 
 1. Crear proyecto en [supabase.com](https://supabase.com)
-2. En **SQL Editor**, ejecutar el script `docs/schema.sql`
+2. En **SQL Editor**, ejecutar `docs/schema.sql` y luego `docs/seed.sql` (datos demo Bruno)
 3. Verificar tablas `shipments` e `idempotency_keys` en **Table Editor**
 4. Copiar credenciales a `.env` (local) y a **Render → Environment** (producción)
+
+Guía paso a paso para local: **`docs/SUPABASE_LOCAL.md`**
 
 Tablas principales:
 
@@ -166,12 +168,15 @@ El microservicio está diseñado bajo los siguientes patrones:
 4.  **Optimistic Locking:** Uso de versionado en la entidad `Envio` para mitigar colisiones de concurrencia.
 
 ### Máquina de Estados
-El ciclo de vida de un envío permite únicamente los siguientes estados secuenciales y estrictos:
+El ciclo de vida de un envío permite únicamente las siguientes transiciones:
 1. `CREATED`
 2. `PICKING`
-3. `OUT_FOR_DELIVERY`
-4. `DELIVERED`
-5. `FAILED`
+3. `ASSIGNED` (asignación de repartidor con `driverId`)
+4. `OUT_FOR_DELIVERY`
+5. `DELIVERED`
+6. `FAILED`
+
+**Reenvío tras fallo:** `POST /v1/shipments/{id}/reship` crea un nuevo envío cuando el original está en `FAILED`. G8 coordina con G5 generando un pedido de reintento (`orderId-R1`) y publica `ShipmentReshipRequested`.
 
 ---
 
@@ -200,7 +205,7 @@ Arq_Microservicio-de-Despacho-y-Logistica/
 │   ├── config/
 │   │   └── supabase.ts            # Cliente de Supabase
 │   ├── controllers/
-│   │   └── despacho.controller.ts # Handlers de los 6 endpoints
+│   │   └── despacho.controller.ts # Handlers REST (shipments + reship)
 │   ├── middlewares/
 │   │   └── auth.middleware.ts     # Validación de JWT (Bearer)
 │   ├── routes/

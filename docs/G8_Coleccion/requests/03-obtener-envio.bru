@@ -1,0 +1,30 @@
+meta {
+  name: 03 Obtener envio por ID
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/v1/shipments/shp_a1b2c3
+}
+
+headers {
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+}
+
+script:post-response {
+  if (res.status === 200) {
+    bru.setVar("etagConfirm", res.headers['etag'] || ('"' + res.body.version + '"'));
+    bru.setVar("shipmentVersion", res.body.version);
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("estado OUT_FOR_DELIVERY", function() {
+    expect(res.body.status).to.equal("OUT_FOR_DELIVERY");
+  });
+}

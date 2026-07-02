@@ -9,3 +9,4 @@ despachoRouter.post('/', despachoController.createShipment);
 despachoRouter.patch('/:id', despachoController.updateShipment);
 despachoRouter.post('/:id/confirm', despachoController.confirmShipment);
 despachoRouter.post('/:id/reject', despachoController.rejectShipment);
+despachoRouter.post('/:id/reship', despachoController.reshipShipment);

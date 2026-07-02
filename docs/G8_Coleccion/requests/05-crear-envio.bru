@@ -1,0 +1,35 @@
+meta {
+  name: 05 Crear envio ORD-1006
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/v1/shipments
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+  Idempotency-Key: idem-create-ord-1006-001
+}
+
+body:json {
+  {
+    "orderId": "ORD-1006"
+  }
+}
+
+script:post-response {
+  if (res.status === 201 || res.status === 200) {
+    bru.setVar("createdShipmentId", res.body.shipmentId);
+  }
+}
+
+tests {
+  test("status 201 al crear", function() {
+    expect(res.status).to.equal(201);
+  });
+}

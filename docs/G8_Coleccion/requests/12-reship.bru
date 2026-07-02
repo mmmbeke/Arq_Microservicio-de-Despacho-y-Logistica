@@ -1,0 +1,44 @@
+meta {
+  name: 12 Reship envio fallido
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{base_url}}/v1/shipments/shp_d4e5f6/reship
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+  Idempotency-Key: idem-reship-ord-1004-001
+}
+
+body:json {
+  {
+    "reason": "Reintento tras devolucion al almacen"
+  }
+}
+
+script:post-response {
+  if (res.status === 201 || res.status === 200) {
+    bru.setVar("reshipShipmentId", res.body.shipmentId);
+  }
+}
+
+tests {
+  test("status 201 al reenviar", function() {
+    expect(res.status).to.equal(201);
+  });
+  test("estado CREATED", function() {
+    expect(res.body.status).to.equal("CREATED");
+  });
+  test("orderId de reintento", function() {
+    expect(res.body.orderId).to.equal("ORD-1004-R1");
+  });
+  test("reshipOf apunta al fallido", function() {
+    expect(res.body.reshipOf).to.equal("shp_d4e5f6");
+  });
+}

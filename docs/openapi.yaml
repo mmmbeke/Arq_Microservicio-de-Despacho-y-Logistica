@@ -32,7 +32,7 @@ info:
     en un estado ilegal. Si no coincide la versión, responde HTTP 412 Precondition Failed.
 
     **Transiciones de estado:**
-    `CREATED` → `PICKING` → `OUT_FOR_DELIVERY` → `DELIVERED` | `FAILED`
+    `CREATED` → `PICKING` → `ASSIGNED` → `OUT_FOR_DELIVERY` → `DELIVERED` | `FAILED`
 
     **Stack acordado (implementación E2+):**
     - Backend: Node.js + TypeScript
@@ -189,9 +189,10 @@ paths:
       summary: Actualizar estado (modo general; preferir POST confirm/reject para idempotencia fuerte)
       description: |
         Avanza el estado logístico. Transiciones válidas:
-        `CREATED` → `PICKING` → `OUT_FOR_DELIVERY` → `DELIVERED` | `FAILED`.
+        `CREATED` → `PICKING` → `ASSIGNED` → `OUT_FOR_DELIVERY` → `DELIVERED` | `FAILED`.
 
-        Al pasar a `PICKING` o `OUT_FOR_DELIVERY`, publica `ShipmentPicking` o `ShipmentOutForDelivery` hacia G9.
+        Al pasar a `ASSIGNED`, incluir `driverId` (obligatorio) y opcionalmente `driverName`.
+        Al pasar a `PICKING`, `ASSIGNED` o `OUT_FOR_DELIVERY`, publica el evento correspondiente hacia G9.
       operationId: patchShipmentStatus
       parameters:
         - $ref: "#/components/parameters/XCorrelationId"
@@ -300,6 +301,54 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
+  /v1/shipments/{shipmentId}/reship:
+    post:
+      tags: [Shipments]
+      summary: Reenvío tras fallo (idempotente) — coordina con G5
+      description: >
+        Crea un nuevo envío cuando el original está en `FAILED`.
+        G8 solicita a G5 un pedido de reintento (`orderId-R1`), publica `ShipmentReshipRequested`
+        y crea el nuevo envío en `CREATED` con `reshipOf` apuntando al envío fallido.
+      operationId: reshipShipment
+      parameters:
+        - $ref: "#/components/parameters/XCorrelationId"
+        - $ref: "#/components/parameters/ShipmentId"
+        - $ref: "#/components/parameters/IdempotencyKeyUuid"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReshipRequest"
+      responses:
+        "201":
+          description: Nuevo envío de reintento creado
+          headers:
+            Location:
+              schema: { type: string }
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "200":
+          description: Reintento idempotente con la misma Idempotency-Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Envío no está en FAILED o ya procesado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
 components:
   parameters:
     ShipmentId:
@@ -346,7 +395,7 @@ components:
   schemas:
     ShipmentStatus:
       type: string
-      enum: [CREATED, PICKING, OUT_FOR_DELIVERY, DELIVERED, FAILED]
+      enum: [CREATED, PICKING, ASSIGNED, OUT_FOR_DELIVERY, DELIVERED, FAILED]
 
     ShipmentLine:
       type: object
@@ -395,6 +444,19 @@ components:
           items: { $ref: "#/components/schemas/ShipmentLine" }
         shipTo:
           $ref: "#/components/schemas/Address"
+        driverId:
+          type: string
+          nullable: true
+          description: Repartidor asignado (requerido en estado ASSIGNED)
+          example: "DRV-01"
+        driverName:
+          type: string
+          nullable: true
+          example: "Carlos Reparto"
+        reshipOf:
+          type: string
+          nullable: true
+          description: shipmentId del envío fallido que originó este reintento
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         deliveredAt: { type: string, format: date-time, nullable: true }
@@ -412,6 +474,11 @@ components:
       properties:
         status:
           $ref: "#/components/schemas/ShipmentStatus"
+        driverId:
+          type: string
+          description: Obligatorio cuando status es ASSIGNED
+        driverName:
+          type: string
         proof:
           type: object
           properties:
@@ -437,6 +504,14 @@ components:
         reason:
           type: string
           maxLength: 500
+
+    ReshipRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+          description: Motivo del reintento (devolución al almacén, cliente no disponible, etc.)
 
     ShipmentPage:
       type: object
@@ -531,9 +606,11 @@ components:
 # PUBLICA (vía REST a G9 — POST /notifications/events):
 #   ShipmentCreated          → al crear envío (POST /v1/shipments); G5 → SHIPPED
 #   ShipmentPicking          → transición a PICKING
+#   ShipmentAssigned         → transición a ASSIGNED (repartidor asignado)
 #   ShipmentOutForDelivery   → transición a OUT_FOR_DELIVERY
 #   ShipmentDelivered        → POST /v1/shipments/{id}/confirm; G5 → DELIVERED
-#   ShipmentFailed           → POST /v1/shipments/{id}/reject
+#   ShipmentFailed           → POST /v1/shipments/{id}/reject; G5 → FAILED
+#   ShipmentReshipRequested  → POST /v1/shipments/{id}/reship; G5 crea pedido de reintento
 #
 # CONSUMIDORES REST (G10):
 #   GET /v1/shipments — estado logístico (complementa estado de pedido en G5)

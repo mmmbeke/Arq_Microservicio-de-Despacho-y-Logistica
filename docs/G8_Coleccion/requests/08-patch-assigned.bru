@@ -1,0 +1,43 @@
+meta {
+  name: 08 PATCH ASSIGNED repartidor
+  type: http
+  seq: 8
+}
+
+patch {
+  url: {{base_url}}/v1/shipments/shp_b2c3d4
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+  If-Match: {{etagAssigned}}
+}
+
+body:json {
+  {
+    "status": "ASSIGNED",
+    "driverId": "DRV-01",
+    "driverName": "Carlos Reparto"
+  }
+}
+
+script:post-response {
+  if (res.status === 200) {
+    bru.setVar("etagOutForDelivery", '"' + res.body.version + '"');
+  }
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("estado ASSIGNED", function() {
+    expect(res.body.status).to.equal("ASSIGNED");
+  });
+  test("tiene driverId", function() {
+    expect(res.body.driverId).to.equal("DRV-01");
+  });
+}

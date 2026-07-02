@@ -1,0 +1,25 @@
+meta {
+  name: 10 Confirmar entrega
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{base_url}}/v1/shipments/shp_a1b2c3/confirm
+}
+
+headers {
+  X-Correlation-Id: corr-test-001
+  X-Consumer: g8-despacho
+  Idempotency-Key: idem-confirm-001
+  If-Match: {{etagConfirm}}
+}
+
+tests {
+  test("status 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("estado DELIVERED", function() {
+    expect(res.body.status).to.equal("DELIVERED");
+  });
+}

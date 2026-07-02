@@ -12,13 +12,12 @@ import { AppError } from '../utils/errors';
 import { fetchOrderSnapshot } from './order.client';
 import { publishShipmentEvent } from './notification.publisher';
 import {
-  cloneShipment,
-  getAllShipments,
   getIdempotencyEntry,
   getShipmentById,
   getShipmentByOrderId,
   isValidTransition,
   nextShipmentId,
+  queryShipments,
   saveShipment,
   setIdempotencyEntry,
 } from '../store/shipment.store';
@@ -53,8 +52,8 @@ function requireIdempotencyKey(key: string | undefined, correlationId: string): 
   return key.trim();
 }
 
-function getShipmentOrThrow(shipmentId: string, correlationId: string): Shipment {
-  const shipment = getShipmentById(shipmentId);
+async function getShipmentOrThrow(shipmentId: string, correlationId: string): Promise<Shipment> {
+  const shipment = await getShipmentById(shipmentId);
   if (!shipment) {
     throw new AppError(
       404,
@@ -66,12 +65,12 @@ function getShipmentOrThrow(shipmentId: string, correlationId: string): Shipment
   return shipment;
 }
 
-function applyStatusChange(
+async function applyStatusChange(
   shipment: Shipment,
   nextStatus: ShipmentStatus,
   correlationId: string,
   proof?: Record<string, unknown> | null
-): Shipment {
+): Promise<Shipment> {
   if (!isValidTransition(shipment.status, nextStatus)) {
     throw new AppError(
       409,
@@ -94,36 +93,26 @@ function applyStatusChange(
   return saveShipment(updated);
 }
 
-export function listShipments(filters: {
+export async function listShipments(filters: {
   orderId?: string;
   status?: ShipmentStatus;
   page?: number;
   pageSize?: number;
-}): ShipmentPage {
+}): Promise<ShipmentPage> {
   const page = Math.max(filters.page ?? 1, 1);
   const pageSize = Math.min(Math.max(filters.pageSize ?? 20, 1), 100);
 
-  let items = getAllShipments();
-
-  if (filters.orderId) {
-    items = items.filter((s) => s.orderId === filters.orderId);
-  }
-  if (filters.status) {
-    items = items.filter((s) => s.status === filters.status);
-  }
-
-  const total = items.length;
-  const start = (page - 1) * pageSize;
-
-  return {
-    items: items.slice(start, start + pageSize),
+  const { items, total } = await queryShipments({
+    orderId: filters.orderId,
+    status: filters.status,
     page,
     pageSize,
-    total,
-  };
+  });
+
+  return { items, page, pageSize, total };
 }
 
-export function getShipment(shipmentId: string, correlationId: string): Shipment {
+export async function getShipment(shipmentId: string, correlationId: string): Promise<Shipment> {
   return getShipmentOrThrow(shipmentId, correlationId);
 }
 
@@ -139,7 +128,7 @@ export async function createShipment(
   }
 
   const payloadHash = hashPayload(body);
-  const cached = getIdempotencyEntry(key);
+  const cached = await getIdempotencyEntry(key);
   if (cached) {
     if (cached.payloadHash !== payloadHash) {
       throw new AppError(
@@ -149,14 +138,14 @@ export async function createShipment(
         correlationId
       );
     }
-    const shipment = getShipmentById(cached.shipmentId);
+    const shipment = await getShipmentById(cached.shipmentId);
     if (!shipment) {
       throw new AppError(500, 'INTERNAL_ERROR', 'Inconsistencia en cache de idempotencia.', correlationId);
     }
     return { shipment, statusCode: cached.statusCode as 200 | 201, isRetry: true };
   }
 
-  const existing = getShipmentByOrderId(body.orderId);
+  const existing = await getShipmentByOrderId(body.orderId);
   if (existing) {
     throw new AppError(
       409,
@@ -186,7 +175,7 @@ export async function createShipment(
   }
 
   const now = new Date().toISOString();
-  const shipment = saveShipment({
+  const shipment = await saveShipment({
     shipmentId: nextShipmentId(),
     orderId: order.orderId,
     userId: order.userId,
@@ -200,7 +189,7 @@ export async function createShipment(
     version: 1,
   });
 
-  setIdempotencyEntry(key, payloadHash, shipment.shipmentId, 201);
+  await setIdempotencyEntry(key, payloadHash, shipment.shipmentId, 201);
   await publishShipmentEvent(shipment, correlationId);
 
   return { shipment, statusCode: 201, isRetry: false };
@@ -212,14 +201,14 @@ export async function patchShipment(
   ifMatch: string | undefined,
   correlationId: string
 ): Promise<Shipment> {
-  const shipment = getShipmentOrThrow(shipmentId, correlationId);
+  const shipment = await getShipmentOrThrow(shipmentId, correlationId);
   assertIfMatch(shipment, ifMatch, correlationId);
 
   if (!body?.status) {
     throw new AppError(400, 'INVALID_REQUEST', 'El campo status es requerido.', correlationId);
   }
 
-  const updated = applyStatusChange(shipment, body.status, correlationId, body.proof ?? null);
+  const updated = await applyStatusChange(shipment, body.status, correlationId, body.proof ?? null);
   await publishShipmentEvent(updated, correlationId);
   return updated;
 }
@@ -233,20 +222,20 @@ export async function confirmShipment(
 ): Promise<{ shipment: Shipment; isRetry: boolean }> {
   const key = requireIdempotencyKey(idempotencyKey, correlationId);
   const payloadHash = hashPayload({ action: 'confirm', shipmentId, body });
-  const cached = getIdempotencyEntry(`confirm:${key}`);
+  const cached = await getIdempotencyEntry(`confirm:${key}`);
 
   if (cached) {
     if (cached.payloadHash !== payloadHash) {
       throw new AppError(409, 'ALREADY_PROCESSED', 'Esta confirmación ya fue procesada con otro payload.', correlationId);
     }
-    return { shipment: getShipmentOrThrow(cached.shipmentId, correlationId), isRetry: true };
+    return { shipment: await getShipmentOrThrow(cached.shipmentId, correlationId), isRetry: true };
   }
 
-  const shipment = getShipmentOrThrow(shipmentId, correlationId);
+  const shipment = await getShipmentOrThrow(shipmentId, correlationId);
   assertIfMatch(shipment, ifMatch, correlationId);
 
   if (shipment.status === 'DELIVERED') {
-    setIdempotencyEntry(`confirm:${key}`, payloadHash, shipmentId, 200);
+    await setIdempotencyEntry(`confirm:${key}`, payloadHash, shipmentId, 200);
     return { shipment, isRetry: true };
   }
 
@@ -259,8 +248,8 @@ export async function confirmShipment(
     );
   }
 
-  const updated = applyStatusChange(shipment, 'DELIVERED', correlationId, body?.proof ?? null);
-  setIdempotencyEntry(`confirm:${key}`, payloadHash, shipmentId, 200);
+  const updated = await applyStatusChange(shipment, 'DELIVERED', correlationId, body?.proof ?? null);
+  await setIdempotencyEntry(`confirm:${key}`, payloadHash, shipmentId, 200);
   await publishShipmentEvent(updated, correlationId);
 
   return { shipment: updated, isRetry: false };
@@ -275,20 +264,20 @@ export async function rejectShipment(
 ): Promise<{ shipment: Shipment; isRetry: boolean }> {
   const key = requireIdempotencyKey(idempotencyKey, correlationId);
   const payloadHash = hashPayload({ action: 'reject', shipmentId, body });
-  const cached = getIdempotencyEntry(`reject:${key}`);
+  const cached = await getIdempotencyEntry(`reject:${key}`);
 
   if (cached) {
     if (cached.payloadHash !== payloadHash) {
       throw new AppError(409, 'ALREADY_PROCESSED', 'Este rechazo ya fue procesado con otro payload.', correlationId);
     }
-    return { shipment: getShipmentOrThrow(cached.shipmentId, correlationId), isRetry: true };
+    return { shipment: await getShipmentOrThrow(cached.shipmentId, correlationId), isRetry: true };
   }
 
-  const shipment = getShipmentOrThrow(shipmentId, correlationId);
+  const shipment = await getShipmentOrThrow(shipmentId, correlationId);
   assertIfMatch(shipment, ifMatch, correlationId);
 
   if (shipment.status === 'FAILED') {
-    setIdempotencyEntry(`reject:${key}`, payloadHash, shipmentId, 200);
+    await setIdempotencyEntry(`reject:${key}`, payloadHash, shipmentId, 200);
     return { shipment, isRetry: true };
   }
 
@@ -301,8 +290,8 @@ export async function rejectShipment(
     );
   }
 
-  const updated = applyStatusChange(shipment, 'FAILED', correlationId, null);
-  setIdempotencyEntry(`reject:${key}`, payloadHash, shipmentId, 200);
+  const updated = await applyStatusChange(shipment, 'FAILED', correlationId, null);
+  await setIdempotencyEntry(`reject:${key}`, payloadHash, shipmentId, 200);
   await publishShipmentEvent(updated, correlationId, body?.reason);
 
   return { shipment: updated, isRetry: false };

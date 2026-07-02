@@ -5,6 +5,8 @@ import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
 import { despachoRouter } from './routes/despacho.routes';
+import { initStore, getPersistenceMode } from './store/shipment.store';
+import { AppError, getCorrelationId, handleControllerError } from './utils/errors';
 
 const openApiPath = path.join(__dirname, '../docs/openapi.yaml');
 const swaggerDocument = YAML.load(openApiPath);
@@ -24,6 +26,10 @@ app.use((req, _res, next) => {
 
 console.log('Iniciando Microservicio de Despacho y Logística (G8)...');
 
+app.get('/', (_req, res) => {
+  res.redirect('/api-docs');
+});
+
 app.use('/v1/shipments', despachoRouter);
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
@@ -32,12 +38,35 @@ app.get('/docs/openapi.yaml', (_req, res) => {
 });
 
 app.get('/health', (_req, res) => {
-  res.status(200).json({ status: 'ok', service: 'despacho' });
+  res.status(200).json({
+    status: 'ok',
+    service: 'despacho',
+    persistence: getPersistenceMode(),
+  });
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor de Despacho corriendo en: http://localhost:${PORT}`);
-  console.log(`Swagger UI: http://localhost:${PORT}/api-docs`);
-  console.log(`OpenAPI YAML: http://localhost:${PORT}/docs/openapi.yaml`);
-  console.log(`Prueba: GET http://localhost:${PORT}/v1/shipments`);
+app.use((req, res) => {
+  const correlationId = getCorrelationId(req.header('X-Correlation-Id'));
+  handleControllerError(
+    res,
+    new AppError(404, 'NOT_FOUND', `Ruta no encontrada: ${req.method} ${req.path}`, correlationId),
+    correlationId
+  );
+});
+
+async function start(): Promise<void> {
+  await initStore();
+
+  app.listen(PORT, () => {
+    console.log(`Servidor de Despacho corriendo en: http://localhost:${PORT}`);
+    console.log(`Swagger UI: http://localhost:${PORT}/api-docs`);
+    console.log(`OpenAPI YAML: http://localhost:${PORT}/docs/openapi.yaml`);
+    console.log(`Persistencia: ${getPersistenceMode()}`);
+    console.log(`Prueba: GET http://localhost:${PORT}/v1/shipments`);
+  });
+}
+
+start().catch((err) => {
+  console.error('Error al iniciar el servicio:', err);
+  process.exit(1);
 });

@@ -1,3 +1,4 @@
+import { getSupabase } from '../config/supabase';
 import { Shipment, ShipmentStatus } from '../types/shipment.types';
 
 const shipments = new Map<string, Shipment>();
@@ -7,13 +8,74 @@ const idempotencyCache = new Map<
   { payloadHash: string; shipmentId: string; statusCode: number }
 >();
 
-const VALID_TRANSITIONS: Record<ShipmentStatus, ShipmentStatus[]> = {
+export const VALID_TRANSITIONS: Record<ShipmentStatus, ShipmentStatus[]> = {
   CREATED: ['PICKING', 'FAILED'],
   PICKING: ['OUT_FOR_DELIVERY', 'FAILED'],
   OUT_FOR_DELIVERY: ['DELIVERED', 'FAILED'],
   DELIVERED: [],
   FAILED: [],
 };
+
+interface ShipmentRow {
+  shipment_id: string;
+  order_id: string;
+  user_id: string;
+  status: ShipmentStatus;
+  lines: Shipment['lines'];
+  ship_to: Shipment['shipTo'];
+  proof: Shipment['proof'];
+  version: number;
+  created_at: string;
+  updated_at: string;
+  delivered_at: string | null;
+}
+
+interface IdempotencyRow {
+  key: string;
+  payload_hash: string;
+  shipment_id: string;
+  status_code: number;
+}
+
+export function isSupabaseEnabled(): boolean {
+  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+export function getPersistenceMode(): 'supabase' | 'memory' {
+  return isSupabaseEnabled() ? 'supabase' : 'memory';
+}
+
+function rowToShipment(row: ShipmentRow): Shipment {
+  return {
+    shipmentId: row.shipment_id,
+    orderId: row.order_id,
+    userId: row.user_id,
+    status: row.status,
+    lines: row.lines,
+    shipTo: row.ship_to,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    deliveredAt: row.delivered_at,
+    proof: row.proof ?? null,
+    version: row.version,
+  };
+}
+
+function shipmentToRow(shipment: Shipment): ShipmentRow {
+  return {
+    shipment_id: shipment.shipmentId,
+    order_id: shipment.orderId,
+    user_id: shipment.userId,
+    status: shipment.status,
+    lines: shipment.lines,
+    ship_to: shipment.shipTo,
+    proof: shipment.proof ?? null,
+    version: shipment.version,
+    created_at: shipment.createdAt,
+    updated_at: shipment.updatedAt,
+    delivered_at: shipment.deliveredAt ?? null,
+  };
+}
 
 function baseShipment(partial: Partial<Shipment> & Pick<Shipment, 'shipmentId' | 'orderId' | 'status'>): Shipment {
   const now = '2026-06-15T10:00:00Z';
@@ -42,7 +104,9 @@ function baseShipment(partial: Partial<Shipment> & Pick<Shipment, 'shipmentId' |
   };
 }
 
-function seed(): void {
+function seedMemory(): void {
+  if (shipments.size > 0) return;
+
   const seeds: Shipment[] = [
     baseShipment({
       shipmentId: 'shp_a1b2c3',
@@ -83,36 +147,35 @@ function seed(): void {
   ];
 
   for (const shipment of seeds) {
-    shipments.set(shipment.shipmentId, shipment);
+    shipments.set(shipment.shipmentId, cloneShipment(shipment));
     shipmentsByOrderId.set(shipment.orderId, shipment.shipmentId);
   }
 }
-
-seed();
 
 export function cloneShipment(shipment: Shipment): Shipment {
   return structuredClone(shipment);
 }
 
-export function getAllShipments(): Shipment[] {
-  return Array.from(shipments.values()).map(cloneShipment);
-}
+export async function initStore(): Promise<void> {
+  if (isSupabaseEnabled()) {
+    console.log('[store] Persistencia: Supabase (PostgreSQL)');
+    const supabase = getSupabase();
+    const { count, error } = await supabase
+      .from('shipments')
+      .select('*', { count: 'exact', head: true });
 
-export function getShipmentById(shipmentId: string): Shipment | undefined {
-  const shipment = shipments.get(shipmentId);
-  return shipment ? cloneShipment(shipment) : undefined;
-}
+    if (error) {
+      console.error('[store] Error conectando a Supabase:', error.message);
+      console.warn('[store] Verifica que ejecutaste docs/schema.sql en Supabase');
+      return;
+    }
 
-export function getShipmentByOrderId(orderId: string): Shipment | undefined {
-  const shipmentId = shipmentsByOrderId.get(orderId);
-  return shipmentId ? getShipmentById(shipmentId) : undefined;
-}
+    console.log(`[store] Supabase OK — ${count ?? 0} envíos en BD`);
+    return;
+  }
 
-export function saveShipment(shipment: Shipment): Shipment {
-  const copy = cloneShipment(shipment);
-  shipments.set(copy.shipmentId, copy);
-  shipmentsByOrderId.set(copy.orderId, copy.shipmentId);
-  return cloneShipment(copy);
+  console.warn('[store] Persistencia: memoria (configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY)');
+  seedMemory();
 }
 
 export function isValidTransition(from: ShipmentStatus, to: ShipmentStatus): boolean {
@@ -120,19 +183,150 @@ export function isValidTransition(from: ShipmentStatus, to: ShipmentStatus): boo
   return VALID_TRANSITIONS[from].includes(to);
 }
 
-export function getIdempotencyEntry(key: string) {
-  return idempotencyCache.get(key);
+export function nextShipmentId(): string {
+  return `shp_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function setIdempotencyEntry(
+export async function queryShipments(filters: {
+  orderId?: string;
+  status?: ShipmentStatus;
+  page: number;
+  pageSize: number;
+}): Promise<{ items: Shipment[]; total: number }> {
+  if (!isSupabaseEnabled()) {
+    seedMemory();
+    let items = Array.from(shipments.values()).map(cloneShipment);
+    if (filters.orderId) items = items.filter((s) => s.orderId === filters.orderId);
+    if (filters.status) items = items.filter((s) => s.status === filters.status);
+    const total = items.length;
+    const start = (filters.page - 1) * filters.pageSize;
+    return { items: items.slice(start, start + filters.pageSize), total };
+  }
+
+  const supabase = getSupabase();
+  let query = supabase.from('shipments').select('*', { count: 'exact' });
+  if (filters.orderId) query = query.eq('order_id', filters.orderId);
+  if (filters.status) query = query.eq('status', filters.status);
+
+  const start = (filters.page - 1) * filters.pageSize;
+  const { data, error, count } = await query
+    .order('created_at', { ascending: false })
+    .range(start, start + filters.pageSize - 1);
+
+  if (error) throw new Error(`Supabase queryShipments: ${error.message}`);
+
+  return {
+    items: (data as ShipmentRow[]).map(rowToShipment),
+    total: count ?? 0,
+  };
+}
+
+export async function getShipmentById(shipmentId: string): Promise<Shipment | undefined> {
+  if (!isSupabaseEnabled()) {
+    seedMemory();
+    const shipment = shipments.get(shipmentId);
+    return shipment ? cloneShipment(shipment) : undefined;
+  }
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('shipments')
+    .select('*')
+    .eq('shipment_id', shipmentId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Supabase getShipmentById: ${error.message}`);
+  return data ? rowToShipment(data as ShipmentRow) : undefined;
+}
+
+export async function getShipmentByOrderId(orderId: string): Promise<Shipment | undefined> {
+  if (!isSupabaseEnabled()) {
+    seedMemory();
+    const shipmentId = shipmentsByOrderId.get(orderId);
+    return shipmentId ? getShipmentById(shipmentId) : undefined;
+  }
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('shipments')
+    .select('*')
+    .eq('order_id', orderId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Supabase getShipmentByOrderId: ${error.message}`);
+  return data ? rowToShipment(data as ShipmentRow) : undefined;
+}
+
+export async function saveShipment(shipment: Shipment): Promise<Shipment> {
+  const copy = cloneShipment(shipment);
+
+  if (!isSupabaseEnabled()) {
+    seedMemory();
+    shipments.set(copy.shipmentId, copy);
+    shipmentsByOrderId.set(copy.orderId, copy.shipmentId);
+    return cloneShipment(copy);
+  }
+
+  const row = shipmentToRow(copy);
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('shipments')
+    .upsert(row, { onConflict: 'shipment_id' })
+    .select('*')
+    .single();
+
+  if (error) throw new Error(`Supabase saveShipment: ${error.message}`);
+  return rowToShipment(data as ShipmentRow);
+}
+
+export async function getIdempotencyEntry(
+  key: string
+): Promise<{ payloadHash: string; shipmentId: string; statusCode: number } | undefined> {
+  if (!isSupabaseEnabled()) {
+    seedMemory();
+    return idempotencyCache.get(key);
+  }
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('idempotency_keys')
+    .select('*')
+    .eq('key', key)
+    .maybeSingle();
+
+  if (error) throw new Error(`Supabase getIdempotencyEntry: ${error.message}`);
+  if (!data) return undefined;
+
+  const row = data as IdempotencyRow;
+  return {
+    payloadHash: row.payload_hash,
+    shipmentId: row.shipment_id,
+    statusCode: row.status_code,
+  };
+}
+
+export async function setIdempotencyEntry(
   key: string,
   payloadHash: string,
   shipmentId: string,
   statusCode: number
-): void {
-  idempotencyCache.set(key, { payloadHash, shipmentId, statusCode });
-}
+): Promise<void> {
+  if (!isSupabaseEnabled()) {
+    seedMemory();
+    idempotencyCache.set(key, { payloadHash, shipmentId, statusCode });
+    return;
+  }
 
-export function nextShipmentId(): string {
-  return `shp_${Math.random().toString(36).slice(2, 10)}`;
+  const supabase = getSupabase();
+  const { error } = await supabase.from('idempotency_keys').upsert(
+    {
+      key,
+      payload_hash: payloadHash,
+      shipment_id: shipmentId,
+      status_code: statusCode,
+    },
+    { onConflict: 'key' }
+  );
+
+  if (error) throw new Error(`Supabase setIdempotencyEntry: ${error.message}`);
 }

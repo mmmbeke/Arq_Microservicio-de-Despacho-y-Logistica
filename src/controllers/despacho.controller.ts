@@ -21,14 +21,14 @@ function parseStatus(value: unknown): ShipmentStatus | undefined {
     : undefined;
 }
 
-export const listShipments = (req: Request, res: Response) => {
+export const listShipments = async (req: Request, res: Response) => {
   const correlationId = getCorrelationId(req.header('X-Correlation-Id'));
 
   try {
     const page = req.query.page ? Number(req.query.page) : 1;
     const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 20;
 
-    const result = shipmentService.listShipments({
+    const result = await shipmentService.listShipments({
       orderId: typeof req.query.orderId === 'string' ? req.query.orderId : undefined,
       status: parseStatus(req.query.status),
       page: Number.isFinite(page) ? page : 1,
@@ -41,11 +41,11 @@ export const listShipments = (req: Request, res: Response) => {
   }
 };
 
-export const getShipment = (req: Request, res: Response) => {
+export const getShipment = async (req: Request, res: Response) => {
   const correlationId = getCorrelationId(req.header('X-Correlation-Id'));
 
   try {
-    const shipment = shipmentService.getShipment(paramId(req), correlationId);
+    const shipment = await shipmentService.getShipment(paramId(req), correlationId);
     res
       .status(200)
       .set('ETag', shipmentService.toEtag(shipment.version))

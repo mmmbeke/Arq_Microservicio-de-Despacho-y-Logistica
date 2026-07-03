@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js v20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias limpias
+        run: npm ci
+
+      - name: Auditoría de Seguridad de Dependencias (SCA)
+        run: npm audit
+        # Si un paquete tiene vulnerabilidades criticas, esto fallará. 
+        # Si solo quieres alertar, puedes usar: continue-on-error: true
+
+      - name: Verificar Compilación de Typescript (Build Check)
+        run: npm run build

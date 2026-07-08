@@ -7,6 +7,8 @@ import YAML from 'yamljs';
 import { despachoRouter } from './routes/despacho.routes';
 import { initStore, getPersistenceMode } from './store/shipment.store';
 import { AppError, getCorrelationId, handleControllerError } from './utils/errors';
+import { closeRabbit, getRabbitStatus, initRabbitTopology, isRabbitEnabled } from './config/rabbitmq';
+import { startOrderConsumer } from './messaging/order.consumer';
 
 const openApiPath = path.join(__dirname, '../docs/openapi.yaml');
 const swaggerDocument = YAML.load(openApiPath);
@@ -42,6 +44,8 @@ app.get('/health', (_req, res) => {
     status: 'ok',
     service: 'despacho',
     persistence: getPersistenceMode(),
+    rabbitmq: getRabbitStatus(),
+    messaging: isRabbitEnabled() ? 'rabbitmq+rest' : 'rest-only',
   });
 });
 
@@ -57,14 +61,30 @@ app.use((req, res) => {
 async function start(): Promise<void> {
   await initStore();
 
+  try {
+    await initRabbitTopology();
+    await startOrderConsumer();
+  } catch (error) {
+    console.error('[rabbitmq] no se pudo iniciar (el API REST sigue activo):', error);
+  }
+
   app.listen(PORT, () => {
     console.log(`Servidor de Despacho corriendo en: http://localhost:${PORT}`);
     console.log(`Swagger UI: http://localhost:${PORT}/api-docs`);
     console.log(`OpenAPI YAML: http://localhost:${PORT}/docs/openapi.yaml`);
     console.log(`Persistencia: ${getPersistenceMode()}`);
+    console.log(`RabbitMQ: ${getRabbitStatus()}`);
     console.log(`Prueba: GET http://localhost:${PORT}/v1/shipments`);
   });
 }
+
+process.on('SIGINT', () => {
+  void closeRabbit().finally(() => process.exit(0));
+});
+
+process.on('SIGTERM', () => {
+  void closeRabbit().finally(() => process.exit(0));
+});
 
 start().catch((err) => {
   console.error('Error al iniciar el servicio:', err);

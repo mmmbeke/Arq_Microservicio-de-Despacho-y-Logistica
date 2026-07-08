@@ -55,8 +55,38 @@ GET http://localhost:3007/health
 Respuesta esperada:
 
 ```json
-{ "status": "ok", "service": "despacho", "persistence": "supabase" }
+{
+  "status": "ok",
+  "service": "despacho",
+  "persistence": "supabase",
+  "rabbitmq": "connected",
+  "messaging": "rabbitmq+rest"
+}
 ```
+
+---
+
+## E4 — Integración (RabbitMQ + REST)
+
+Guías detalladas:
+
+*   **`docs/integracion/FLUJO_E4.md`** — plan de entrega y evidencias
+*   **`docs/integracion/RABBITMQ.md`** — topología, variables y pruebas
+
+### Integraciones del ecosistema
+
+| Grupo | Protocolo | G8 |
+| :--- | :--- | :--- |
+| **G5 Pedidos** | RabbitMQ + REST | Consume `ReadyToShip`; consulta `GET /orders/{id}` |
+| **G9 Notificaciones** | RabbitMQ + REST | Publica `ShipmentCreated`, `ShipmentDelivered`, etc. |
+| **G10 Reportería** | REST | Expone `GET /v1/shipments` |
+
+### Flujo resumido
+
+1. G5 publica `ReadyToShip` en RabbitMQ → G8 crea envío
+2. G8 valida pedido en G5 (`READY_TO_SHIP`) vía REST
+3. G8 publica eventos de despacho → G9 (RabbitMQ; REST opcional)
+4. G10 consulta estado logístico vía REST
 
 ---
 
@@ -68,8 +98,13 @@ Respuesta esperada:
 | `SUPABASE_URL` | Sí | URL del proyecto Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | Sí | Secret key del backend (Settings → API Keys → Secret keys) |
 | `SUPABASE_ANON_KEY` | No | No usada por el backend actualmente |
-| `G5_ORDER_SERVICE_URL` | No | URL mock/servicio de pedidos (opcional) |
-| `G9_NOTIFICATION_SERVICE_URL` | No | URL mock/servicio de notificaciones (opcional) |
+| `RABBITMQ_URL` | E4 | URL AMQP del broker compartido |
+| `RABBITMQ_EXCHANGE` | No | Exchange topic (default `fishmarket.events`) |
+| `RABBITMQ_ORDER_QUEUE` | No | Cola que consume G8 (default `g8.dispatch.orders`) |
+| `RABBITMQ_ORDER_ROUTING_KEYS` | No | Keys de G5 (`ReadyToShip`, etc.) |
+| `G5_ORDER_SERVICE_URL` | E4 | URL REST de G5 para `GET /orders/{id}` |
+| `G9_NOTIFICATION_SERVICE_URL` | E4 | URL REST de G9 (respaldo a RabbitMQ) |
+| `G9_NOTIFY_VIA_REST` | No | `true` (default) envía también por REST a G9 |
 
 > **Nunca** subir el archivo `.env` al repositorio.
 
@@ -100,8 +135,10 @@ Tablas principales:
 3. Agregar variables de entorno:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - `RABBITMQ_URL` (E4)
+   - `G5_ORDER_SERVICE_URL`, `G9_NOTIFICATION_SERVICE_URL` (E4)
 4. **Manual Deploy** → último commit de `main`
-5. Verificar: `/health` debe responder `"persistence": "supabase"`
+5. Verificar: `/health` debe responder `"persistence": "supabase"` y `"rabbitmq": "connected"`
 
 > En plan Free, el servicio puede tardar ~30–50 s en despertar tras inactividad.
 
@@ -139,7 +176,7 @@ Nuestra arquitectura se basa en las siguientes tecnologías modernas:
 *   **Backend / API:** Node.js + TypeScript
 *   **Frontend (Panel Logístico):** React
 *   **Base de Datos:** PostgreSQL (Supabase)
-*   **Mensajería (Eventos):** REST hacia G9 (`POST /notifications/events`)
+*   **Mensajería (Eventos):** RabbitMQ (topic) + REST hacia G9 (`POST /notifications/events`)
 *   **Despliegue Backend:** Render
 *   **Despliegue Frontend:** Vercel
 

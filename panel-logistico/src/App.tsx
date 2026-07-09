@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Package, Truck, CheckCircle, AlertCircle, MapPin, Clock, RefreshCw, Sun, Moon } from 'lucide-react';
+import { Package, Truck, CheckCircle, AlertCircle, MapPin, Clock, RefreshCw, Sun, Moon, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
 import { fetchShipments, updateShipmentStatus } from './api';
 import type { Shipment, ShipmentStatus } from './api';
 
@@ -34,6 +34,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (id: string) => {
+    setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   useEffect(() => {
     if (isDarkMode) {
@@ -147,37 +152,82 @@ export default function App() {
         </div>
         
         {shipments.map(shipment => (
-          <div key={shipment.shipmentId} className="list-row">
-            <div className="list-col-main">
-              <Package size={16} style={{ color: 'var(--color-text-muted)' }} />
-              <div>
-                <a href="#" className="list-title">Envío #{shipment.shipmentId.slice(0, 8)}</a>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Orden: {shipment.orderId}</div>
+          <div key={shipment.shipmentId} style={{ borderBottom: '1px solid var(--color-border)' }}>
+            <div 
+              className="list-row" 
+              style={{ borderBottom: 'none', cursor: 'pointer' }}
+              onClick={() => toggleExpand(shipment.shipmentId)}
+            >
+              <div className="list-col-main">
+                <Package size={16} style={{ color: 'var(--color-text-muted)' }} />
+                <div>
+                  <a href="#" onClick={(e) => e.preventDefault()} className="list-title">Envío #{shipment.shipmentId.slice(0, 8)}</a>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Orden: {shipment.orderId}</div>
+                </div>
+              </div>
+              
+              <div className="list-col-desc">
+                Destino: {shipment.shipTo.addressLine1}, {shipment.shipTo.city}
+              </div>
+
+              <div className="list-col-status">
+                <StatusBadge status={shipment.status} />
+              </div>
+              
+              <div className="list-col-time">
+                {new Date(shipment.updatedAt).toLocaleTimeString()}
+              </div>
+              <div className="list-col-action" style={{ gap: '8px' }}>
+                {getNextStatus(shipment.status) && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleNextState(shipment); }}
+                    className="btn-primary btn-small" 
+                    disabled={loading}
+                  >
+                    Siguiente
+                  </button>
+                )}
+                <button 
+                  className="btn-primary btn-small" 
+                  style={{ background: 'transparent', border: '1px solid var(--color-border)', color: 'var(--color-text-main)', padding: '6px', boxShadow: 'none' }}
+                >
+                  {expanded[shipment.shipmentId] ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                </button>
               </div>
             </div>
-            
-            <div className="list-col-desc">
-              Destino: {shipment.shipTo.addressLine1}, {shipment.shipTo.city}
-            </div>
 
-            <div className="list-col-status">
-              <StatusBadge status={shipment.status} />
-            </div>
-            
-            <div className="list-col-time">
-              {new Date(shipment.updatedAt).toLocaleTimeString()}
-            </div>
-            <div className="list-col-action">
-              {getNextStatus(shipment.status) && (
-                <button 
-                  onClick={() => handleNextState(shipment)}
-                  className="btn-primary btn-small" 
-                  disabled={loading}
-                >
-                  Siguiente
-                </button>
-              )}
-            </div>
+            {expanded[shipment.shipmentId] && (
+              <div style={{ padding: '12px 16px 20px 44px', background: 'rgba(0, 0, 0, 0.1)', borderTop: '1px solid rgba(0, 255, 204, 0.05)' }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Historial de Tiempos Registrados</h4>
+                <div style={{ display: 'flex', gap: '32px', fontSize: '0.85rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-main)' }}>
+                    <Calendar size={16} style={{ color: 'var(--color-text-muted)' }} />
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '2px' }}>Creado en sistema</div>
+                      <div>{new Date(shipment.createdAt).toLocaleString()}</div>
+                    </div>
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-main)' }}>
+                    <RefreshCw size={16} style={{ color: 'var(--status-picking-text)' }} />
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '2px' }}>Último cambio ({shipment.status})</div>
+                      <div>{new Date(shipment.updatedAt).toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  {shipment.deliveredAt && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-main)' }}>
+                      <CheckCircle size={16} style={{ color: 'var(--status-delivered-text)' }} />
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '2px' }}>Hora de entrega</div>
+                        <div>{new Date(shipment.deliveredAt).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         ))}
 

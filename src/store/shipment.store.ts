@@ -273,6 +273,8 @@ export async function getShipmentByOrderId(orderId: string): Promise<Shipment | 
     .from('shipments')
     .select('*')
     .eq('order_id', orderId)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) throw new Error(`Supabase getShipmentByOrderId: ${error.message}`);

@@ -186,12 +186,7 @@ export async function createRetryOrderFromFailed(
     throw new Error(`No hay snapshot de pedido para reintento: ${originalOrderId}`);
   }
 
-  let attempt = 1;
-  let retryOrderId = `${originalOrderId}-R${attempt}`;
-  while (await orderExists(retryOrderId)) {
-    attempt += 1;
-    retryOrderId = `${originalOrderId}-R${attempt}`;
-  }
+  const retryOrderId = originalOrderId;
 
   const retryOrder: OrderSnapshot = {
     orderId: retryOrderId,

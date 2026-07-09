@@ -6,6 +6,8 @@ let connection: ChannelModel | null = null;
 let channel: Channel | null = null;
 let status: RabbitStatus = 'disabled';
 
+let autoQueueName: string | null = null;
+
 export function isRabbitEnabled(): boolean {
   return Boolean(process.env.RABBITMQ_URL?.trim());
 }
@@ -19,6 +21,7 @@ export function getRabbitExchange(): string {
 }
 
 export function getRabbitOrderQueue(): string {
+  if (autoQueueName) return autoQueueName;
   return process.env.RABBITMQ_ORDER_QUEUE?.trim() || 'g8.dispatch.orders';
 }
 
@@ -65,18 +68,20 @@ export async function initRabbitTopology(): Promise<void> {
 
   const ch = await getRabbitChannel();
   const exchange = getRabbitExchange();
-  const queue = getRabbitOrderQueue();
   const routingKeys = getRabbitOrderRoutingKeys();
 
   await ch.assertExchange(exchange, 'topic', { durable: true });
-  await ch.assertQueue(queue, { durable: true });
+  
+  // Auto-generar queue exclusiva en lugar de un nombre fijo
+  const q = await ch.assertQueue('', { exclusive: true });
+  autoQueueName = q.queue;
 
   for (const routingKey of routingKeys) {
-    await ch.bindQueue(queue, exchange, routingKey);
+    await ch.bindQueue(autoQueueName, exchange, routingKey);
   }
 
   console.log(
-    `[rabbitmq] OK — exchange=${exchange} queue=${queue} keys=[${routingKeys.join(', ')}]`
+    `[rabbitmq] OK — exchange=${exchange} queue=${autoQueueName} keys=[${routingKeys.join(', ')}]`
   );
 }
 

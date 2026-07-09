@@ -153,11 +153,11 @@ export async function createShipment(
   }
 
   const existing = await getShipmentByOrderId(body.orderId);
-  if (existing) {
+  if (existing && existing.status !== 'FAILED') {
     throw new AppError(
       409,
       'SHIPMENT_ALREADY_EXISTS',
-      'Ya existe un envío para este pedido.',
+      'Ya existe un envío activo para este pedido.',
       correlationId
     );
   }
@@ -355,11 +355,11 @@ export async function reshipShipment(
   });
 
   const existing = await getShipmentByOrderId(retryOrder.orderId);
-  if (existing) {
+  if (existing && existing.status !== 'FAILED') {
     throw new AppError(
       409,
       'SHIPMENT_ALREADY_EXISTS',
-      'Ya existe un envío para el pedido de reintento.',
+      'Ya existe un envío activo para el pedido de reintento.',
       correlationId
     );
   }

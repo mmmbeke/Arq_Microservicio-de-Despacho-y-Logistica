@@ -9,9 +9,9 @@ post {
 }
 
 headers {
-  X-Correlation-Id: corr-test-001
-  X-Consumer: g8-despacho
-  Idempotency-Key: idem-confirm-001
+  X-Correlation-Id: {{$randomUUID}}
+  X-Consumer: dispatch-service
+  Idempotency-Key: {{$randomUUID}}
   If-Match: {{etagConfirm}}
 }
 

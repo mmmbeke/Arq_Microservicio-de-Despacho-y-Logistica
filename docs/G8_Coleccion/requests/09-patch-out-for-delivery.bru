@@ -11,8 +11,8 @@ patch {
 
 headers {
   Content-Type: application/json
-  X-Correlation-Id: corr-test-001
-  X-Consumer: g8-despacho
+  X-Correlation-Id: {{$randomUUID}}
+  X-Consumer: dispatch-service
   If-Match: {{etagOutForDelivery}}
 }
 

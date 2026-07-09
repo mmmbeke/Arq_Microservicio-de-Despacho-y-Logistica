@@ -1,5 +1,5 @@
 meta {
-  name: 05 Crear envio ORD-1006
+  name: 05 Crear envio 
   type: http
   seq: 5
 }
@@ -7,6 +7,7 @@ meta {
 post {
   url: {{base_url}}/v1/shipments
   body: json
+  auth: none
 }
 
 headers {

@@ -5,13 +5,15 @@ meta {
 }
 
 post {
-  url: {{base_url}}/v1/shipments/shp_a1b2c3/confirm
+  url: {{base_url}}/v1/shipments/shp_gqufnow2/confirm
+  body: none
+  auth: none
 }
 
 headers {
   X-Correlation-Id: corr-test-001
   X-Consumer: g8-despacho
-  Idempotency-Key: idem-confirm-001
+  Idempotency-Key:  {{$randomUUID}}
   If-Match: {{etagConfirm}}
 }
 

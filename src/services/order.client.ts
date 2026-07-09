@@ -59,6 +59,76 @@ const MOCK_ORDERS: Record<string, OrderSnapshot> = {
   },
 };
 
+const DEFAULT_SHIP_TO: Address = {
+  fullName: 'Cliente FishMarket',
+  addressLine1: 'Dirección pendiente (G5)',
+  city: 'Santiago',
+  region: 'RM',
+  country: 'CL',
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+/** Mapea respuesta real de G5 (id, product_id, etc.) al snapshot interno de G8. */
+function mapG5Order(raw: unknown, requestedOrderId: string): OrderSnapshot | null {
+  const root = asRecord(raw);
+  if (!root) return null;
+
+  const data = asRecord(root.data) ?? root;
+  const orderId =
+    (typeof data.orderId === 'string' && data.orderId) ||
+    (typeof data.id === 'string' && data.id) ||
+    (typeof data.order_id === 'string' && data.order_id) ||
+    requestedOrderId;
+
+  const userId =
+    (typeof data.userId === 'string' && data.userId) ||
+    (typeof data.user_id === 'string' && data.user_id) ||
+    'USR-UNKNOWN';
+
+  const status = typeof data.status === 'string' ? data.status.toUpperCase() : '';
+
+  const itemsRaw = Array.isArray(data.items)
+    ? data.items
+    : Array.isArray(data.lines)
+      ? data.lines
+      : [];
+
+  const lines: ShipmentLine[] = itemsRaw.map((item) => {
+    const row = asRecord(item) ?? {};
+    const sku =
+      (typeof row.productId === 'string' && row.productId) ||
+      (typeof row.product_id === 'string' && row.product_id) ||
+      (typeof row.sku === 'string' && row.sku) ||
+      'SKU-UNKNOWN';
+    const qty = Number(row.quantity ?? row.qty ?? 1);
+    const description =
+      (typeof row.description === 'string' && row.description) ||
+      (typeof row.name === 'string' && row.name) ||
+      undefined;
+
+    return { sku, qty: Number.isFinite(qty) ? qty : 1, description };
+  });
+
+  const shipToRaw = asRecord(data.shipTo) ?? asRecord(data.ship_to) ?? asRecord(data.shippingAddress);
+  const shipTo: Address = shipToRaw
+    ? {
+        fullName: String(shipToRaw.fullName ?? shipToRaw.full_name ?? 'Cliente'),
+        addressLine1: String(shipToRaw.addressLine1 ?? shipToRaw.address_line1 ?? shipToRaw.street ?? 'Sin dirección'),
+        city: String(shipToRaw.city ?? 'Santiago'),
+        region: shipToRaw.region ? String(shipToRaw.region) : undefined,
+        postalCode: shipToRaw.postalCode ? String(shipToRaw.postalCode) : undefined,
+        country: String(shipToRaw.country ?? 'CL'),
+      }
+    : (MOCK_ORDERS[requestedOrderId]?.shipTo ?? DEFAULT_SHIP_TO);
+
+  if (!orderId || !status) return null;
+
+  return { orderId, userId, status, lines, shipTo };
+}
+
 async function orderExists(orderId: string): Promise<boolean> {
   if (MOCK_ORDERS[orderId]) return true;
   const shipment = await getShipmentByOrderId(orderId);
@@ -81,26 +151,20 @@ export async function fetchOrderSnapshot(orderId: string): Promise<OrderSnapshot
         },
       });
 
-      if (!response.ok) return MOCK_ORDERS[orderId] ?? null;
+      if (!response.ok) {
+        console.warn(`[g5-client] GET /orders/${orderId} → ${response.status}`);
+        return MOCK_ORDERS[orderId] ?? null;
+      }
 
-      const order = (await response.json()) as {
-        orderId: string;
-        userId: string;
-        status: string;
-        items?: Array<{ productId: string; quantity: number }>;
-      };
+      const raw = await response.json();
+      const mapped = mapG5Order(raw, orderId);
+      if (mapped) {
+        console.log(`[g5-client] pedido ${mapped.orderId} status=${mapped.status}`);
+        return mapped;
+      }
 
-      return {
-        orderId: order.orderId,
-        userId: order.userId,
-        status: order.status,
-        lines:
-          order.items?.map((item) => ({
-            sku: item.productId,
-            qty: item.quantity,
-          })) ?? [],
-        shipTo: MOCK_ORDERS[orderId]?.shipTo ?? MOCK_ORDERS['ORD-1001'].shipTo,
-      };
+      console.warn('[g5-client] respuesta G5 no mapeable para', orderId);
+      return MOCK_ORDERS[orderId] ?? null;
     } catch (error) {
       console.warn('[g5-client] no se pudo consultar G5, usando mock local:', error);
     }

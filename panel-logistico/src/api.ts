@@ -37,14 +37,14 @@ export async function fetchShipments(): Promise<Shipment[]> {
   return data.items || []; // Backend returns paginated { items, total... }
 }
 
-export async function updateShipmentStatus(shipmentId: string, status: ShipmentStatus, version: number): Promise<Shipment> {
-  const res = await fetch(`${API_BASE}/shipments/${shipmentId}/status`, {
+export async function updateShipmentStatus(shipmentId: string, status: ShipmentStatus, version: number, additionalData: any = {}): Promise<Shipment> {
+  const res = await fetch(`${API_BASE}/shipments/${shipmentId}`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
       'If-Match': `"${version}"`
     },
-    body: JSON.stringify({ status })
+    body: JSON.stringify({ status, ...additionalData })
   });
   
   if (!res.ok) {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Package, Truck, CheckCircle, AlertCircle, MapPin, Clock, RefreshCw, Sun, Moon } from 'lucide-react';
-import { fetchShipments } from './api';
+import { fetchShipments, updateShipmentStatus } from './api';
 import type { Shipment, ShipmentStatus } from './api';
 
 const StatusBadge = ({ status }: { status: ShipmentStatus }) => {
@@ -62,6 +62,40 @@ export default function App() {
     loadData();
   }, []);
 
+  const handleNextState = async (shipment: Shipment) => {
+    const flow: Record<string, ShipmentStatus> = {
+      'CREATED': 'PICKING',
+      'PICKING': 'ASSIGNED',
+      'ASSIGNED': 'OUT_FOR_DELIVERY',
+      'OUT_FOR_DELIVERY': 'DELIVERED'
+    };
+    const nextStatus = flow[shipment.status];
+    if (!nextStatus) return;
+
+    const additionalData = nextStatus === 'ASSIGNED' 
+      ? { driverId: 'DRV-01', driverName: 'Carlos Reparto' } 
+      : {};
+
+    try {
+      setLoading(true);
+      await updateShipmentStatus(shipment.shipmentId, nextStatus, shipment.version, additionalData);
+      await loadData();
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  const getNextStatus = (current: ShipmentStatus): ShipmentStatus | null => {
+    const flow: Record<string, ShipmentStatus> = {
+      'CREATED': 'PICKING',
+      'PICKING': 'ASSIGNED',
+      'ASSIGNED': 'OUT_FOR_DELIVERY',
+      'OUT_FOR_DELIVERY': 'DELIVERED'
+    };
+    return flow[current] || null;
+  };
+
   return (
     <div className="container animate-in">
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem' }}>
@@ -109,6 +143,7 @@ export default function App() {
           <div className="list-col-desc">Dirección de Destino</div>
           <div className="list-col-status">Estado Actual</div>
           <div className="list-col-time">Última Act.</div>
+          <div className="list-col-action"></div>
         </div>
         
         {shipments.map(shipment => (
@@ -131,6 +166,17 @@ export default function App() {
             
             <div className="list-col-time">
               {new Date(shipment.updatedAt).toLocaleTimeString()}
+            </div>
+            <div className="list-col-action">
+              {getNextStatus(shipment.status) && (
+                <button 
+                  onClick={() => handleNextState(shipment)}
+                  className="btn-primary btn-small" 
+                  disabled={loading}
+                >
+                  Siguiente
+                </button>
+              )}
             </div>
           </div>
         ))}

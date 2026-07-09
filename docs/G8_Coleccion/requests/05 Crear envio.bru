@@ -12,9 +12,9 @@ post {
 
 headers {
   Content-Type: application/json
-  X-Correlation-Id: corr-test-001
-  X-Consumer: g8-despacho
-  Idempotency-Key: idem-create-ord-1006-001
+  X-Correlation-Id: {{$randomUUID}}
+  X-Consumer: dispatch-service
+  Idempotency-Key: {{$randomUUID}}
 }
 
 body:json {

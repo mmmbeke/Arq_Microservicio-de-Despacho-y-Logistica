@@ -146,8 +146,8 @@ export default function App() {
         <div className="list-header-row">
           <div className="list-col-main">Identificador / Orden</div>
           <div className="list-col-desc">Dirección de Destino</div>
-          <div className="list-col-status">Estado Actual</div>
-          <div className="list-col-time">Última Act.</div>
+          <div className="list-col-status" style={{ textAlign: 'center', justifyContent: 'center' }}>Estado Actual</div>
+          <div className="list-col-time" style={{ textAlign: 'right' }}>Última Act.</div>
           <div className="list-col-action"></div>
         </div>
         

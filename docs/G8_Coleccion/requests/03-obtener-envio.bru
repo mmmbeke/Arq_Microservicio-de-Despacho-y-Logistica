@@ -5,7 +5,9 @@ meta {
 }
 
 get {
-  url: {{base_url}}/v1/shipments/shp_a1b2c3
+  url: {{base_url}}/v1/shipments/{{currentShipmentId}}
+  body: none
+  auth: none
 }
 
 headers {

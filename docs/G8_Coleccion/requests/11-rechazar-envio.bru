@@ -5,8 +5,9 @@ meta {
 }
 
 post {
-  url: {{base_url}}/v1/shipments/shp_b2c3d4/reject
+  url: {{base_url}}/v1/shipments/{{currentShipmentId}}/reject
   body: json
+  auth: none
 }
 
 headers {

@@ -5,8 +5,9 @@ meta {
 }
 
 post {
-  url: {{base_url}}/v1/shipments/shp_d4e5f6/reship
+  url: {{base_url}}/v1/shipments/{{currentShipmentId}}/reship
   body: json
+  auth: none
 }
 
 headers {
@@ -32,13 +33,16 @@ tests {
   test("status 201 al reenviar", function() {
     expect(res.status).to.equal(201);
   });
+  
   test("estado CREATED", function() {
     expect(res.body.status).to.equal("CREATED");
   });
+  
   test("orderId de reintento", function() {
-    expect(res.body.orderId).to.equal("ORD-1004-R1");
+    expect(res.body.orderId).to.include("-R1");
   });
+  
   test("reshipOf apunta al fallido", function() {
-    expect(res.body.reshipOf).to.equal("shp_d4e5f6");
+    expect(res.body.reshipOf).to.equal(bru.getVar("currentShipmentId"));
   });
 }

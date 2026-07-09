@@ -7,18 +7,25 @@ meta {
 post {
   url: {{base_url}}/v1/shipments
   body: json
+  auth: none
 }
 
 headers {
   Content-Type: application/json
   X-Correlation-Id: {{$randomUUID}}
   X-Consumer: dispatch-service
-  Idempotency-Key: {{$randomUUID}}
+  Idempotency-Key: {{sharedIdemKey}}
 }
 
 body:json {
   {
-    "orderId": "ORD-1006"
+      "orderId": "{{testOrderId}}"
+  }
+}
+
+script:post-response {
+  if (res.status === 201 || res.status === 200) {
+      bru.setVar("testOrderId", req.body.orderId);
   }
 }
 

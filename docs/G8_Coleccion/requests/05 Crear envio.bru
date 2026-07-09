@@ -1,5 +1,5 @@
 meta {
-  name: 05 Crear envio 
+  name: 05 Crear envio
   type: http
   seq: 5
 }
@@ -14,18 +14,33 @@ headers {
   Content-Type: application/json
   X-Correlation-Id: {{$randomUUID}}
   X-Consumer: dispatch-service
-  Idempotency-Key: {{$randomUUID}}
+  Idempotency-Key: {{sharedIdemKey}}
 }
 
 body:json {
   {
-    "orderId": "ORD-1006"
+      "orderId": "{{$randomUUID}}"
   }
+}
+
+script:pre-request {
+  // Pre Request de 05
+  function generateUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          var r = Math.random() * 16 | 0;
+          var v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+      });
+  }
+  
+  bru.setVar("sharedIdemKey", generateUUID());
 }
 
 script:post-response {
   if (res.status === 201 || res.status === 200) {
-    bru.setVar("createdShipmentId", res.body.shipmentId);
+      bru.setVar("testOrderId", req.body.orderId);
+      bru.setVar("testIdempotencyKey", req.headers["Idempotency-Key"]);
+      bru.setVar("testShipmentId", res.body.shipmentId);
   }
 }
 

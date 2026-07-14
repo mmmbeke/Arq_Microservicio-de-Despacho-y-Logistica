@@ -186,8 +186,14 @@ export async function createRetryOrderFromFailed(
     throw new Error(`No hay snapshot de pedido para reintento: ${originalOrderId}`);
   }
 
-  const retryOrderId = originalOrderId;
-
+  let retryOrderId = originalOrderId;
+  const match = originalOrderId.match(/-R(\d+)$/);
+  if (match) {
+    const nextNum = parseInt(match[1], 10) + 1;
+    retryOrderId = originalOrderId.replace(/-R\d+$/, `-R${nextNum}`);
+  } else {
+    retryOrderId = `${originalOrderId}-R1`;
+  }
   const retryOrder: OrderSnapshot = {
     orderId: retryOrderId,
     userId: base.userId,

@@ -17,6 +17,7 @@ export default function App() {
   const [signature, setSignature] = useState('');
   const [newStatus, setNewStatus] = useState<ShipmentStatus>('PICKING');
   const [submitting, setSubmitting] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<ShipmentStatus | 'ALL'>('ALL');
 
   const loadData = async () => {
     setLoading(true);
@@ -46,11 +47,11 @@ export default function App() {
       if (actionType === 'status') {
         await updateShipmentStatus(selectedShipment.shipmentId, newStatus, selectedShipment.version, driverId || undefined);
       } else if (actionType === 'confirm') {
-        await confirmDelivery(selectedShipment.shipmentId, signature);
+        await confirmDelivery(selectedShipment.shipmentId, signature, selectedShipment.version);
       } else if (actionType === 'reject') {
-        await rejectShipment(selectedShipment.shipmentId, reason);
+        await rejectShipment(selectedShipment.shipmentId, reason, selectedShipment.version);
       } else if (actionType === 'reship') {
-        await reshipShipment(selectedShipment.shipmentId, reason);
+        await reshipShipment(selectedShipment.shipmentId, reason, selectedShipment.version);
       }
       setSelectedShipment(null);
       setActionType(null);
@@ -102,15 +103,48 @@ export default function App() {
         </div>
       )}
 
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ color: 'var(--text-secondary)', marginRight: '8px', fontSize: '0.9rem', fontWeight: 500 }}>Filtrar por estado:</span>
+        {['ALL', 'CREATED', 'PICKING', 'ASSIGNED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'FAILED'].map(status => {
+          const isSelected = filterStatus === status;
+          return (
+            <button
+              key={status}
+              onClick={() => setFilterStatus(status as any)}
+              className={`badge ${status !== 'ALL' ? 'badge-' + status : ''}`}
+              style={{
+                cursor: 'pointer',
+                opacity: isSelected ? 1 : 0.4,
+                transition: 'all 0.2s ease',
+                border: isSelected ? '1px solid currentColor' : '1px solid transparent',
+                background: status === 'ALL' ? 'rgba(255, 255, 255, 0.05)' : undefined,
+                color: status === 'ALL' ? 'var(--text-primary)' : undefined,
+                boxShadow: isSelected && status !== 'ALL' ? '0 0 10px currentColor' : 'none',
+                outline: 'none'
+              }}
+            >
+              {status === 'ALL' ? 'TODOS' : status.replace(/_/g, ' ')}
+            </button>
+          )
+        })}
+      </div>
+
       {loading && shipments.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>Cargando envíos...</div>
       ) : (
         <div className="shipment-grid">
-          {shipments.map(s => (
-            <div key={s.shipmentId} className={`card glass status-${s.status}`}>
+          {(filterStatus === 'ALL' ? shipments : shipments.filter(s => s.status === filterStatus)).length === 0 ? (
+            <div style={{ textAlign: 'center', gridColumn: '1 / -1', padding: '3rem', color: 'var(--text-secondary)' }}>
+              No hay envíos que coincidan con este estado.
+            </div>
+          ) : (
+            (filterStatus === 'ALL' ? shipments : shipments.filter(s => s.status === filterStatus)).map(s => (
+              <div key={s.shipmentId} className={`card glass status-${s.status}`}>
               <div className="card-header">
                 <div>
-                  <div className="card-title">Order {s.orderId}</div>
+                  <div className="card-title" title={`Order ${s.orderId}`}>
+                    Order {s.orderId.length > 12 ? s.orderId.substring(0, 12) + '...' : s.orderId}
+                  </div>
                   <div className="card-subtitle">ID: {s.shipmentId.substring(0, 12)}...</div>
                 </div>
                 <div className={`badge badge-${s.status}`} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -174,7 +208,7 @@ export default function App() {
                 )}
               </div>
             </div>
-          ))}
+          )))}
         </div>
       )}
 

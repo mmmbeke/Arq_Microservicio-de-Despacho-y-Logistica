@@ -23,6 +23,7 @@ export interface Shipment {
   shipTo: Address;
   driverId: string | null;
   driverName: string | null;
+  reshipOf: string | null;
   createdAt: string;
   updatedAt: string;
   deliveredAt: string | null;

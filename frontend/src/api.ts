@@ -9,6 +9,12 @@ export async function fetchShipments(): Promise<Shipment[]> {
   return data.items || [];
 }
 
+export async function fetchDrivers(): Promise<{driver_id: string, driver_name: string}[]> {
+  const res = await fetch(`http://localhost:3007/v1/drivers`);
+  if (!res.ok) throw new Error('Failed to fetch drivers');
+  return res.json();
+}
+
 export async function updateShipmentStatus(id: string, status: ShipmentStatus, version: number, driverId?: string): Promise<Shipment> {
   const payload: any = { status };
   if (driverId) payload.driverId = driverId;
@@ -27,12 +33,13 @@ export async function updateShipmentStatus(id: string, status: ShipmentStatus, v
   return res.json();
 }
 
-export async function confirmDelivery(id: string, signature: string): Promise<Shipment> {
+export async function confirmDelivery(id: string, signature: string, version: number): Promise<Shipment> {
   const res = await fetch(`${API_URL}/${id}/confirm`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Idempotency-Key': `confirm-${id}-${Date.now()}`
+      'Idempotency-Key': `confirm-${id}-${Date.now()}`,
+      'If-Match': `"${version}"`
     },
     body: JSON.stringify({ proof: signature })
   });
@@ -43,12 +50,13 @@ export async function confirmDelivery(id: string, signature: string): Promise<Sh
   return res.json();
 }
 
-export async function rejectShipment(id: string, reason: string): Promise<Shipment> {
+export async function rejectShipment(id: string, reason: string, version: number): Promise<Shipment> {
   const res = await fetch(`${API_URL}/${id}/reject`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Idempotency-Key': `reject-${id}-${Date.now()}`
+      'Idempotency-Key': `reject-${id}-${Date.now()}`,
+      'If-Match': `"${version}"`
     },
     body: JSON.stringify({ reason })
   });
@@ -59,12 +67,13 @@ export async function rejectShipment(id: string, reason: string): Promise<Shipme
   return res.json();
 }
 
-export async function reshipShipment(id: string, reason: string): Promise<Shipment> {
+export async function reshipShipment(id: string, reason: string, version: number): Promise<Shipment> {
   const res = await fetch(`${API_URL}/${id}/reship`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Idempotency-Key': `reship-${id}-${Date.now()}`
+      'Idempotency-Key': `reship-${id}-${Date.now()}`,
+      'If-Match': `"${version}"`
     },
     body: JSON.stringify({ reason })
   });

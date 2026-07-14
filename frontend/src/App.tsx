@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Package, Truck, CheckCircle, AlertTriangle, Play, RefreshCw, X } from 'lucide-react';
-import { fetchShipments, updateShipmentStatus, confirmDelivery, rejectShipment, reshipShipment } from './api';
+import { fetchShipments, updateShipmentStatus, confirmDelivery, rejectShipment, reshipShipment, fetchDrivers } from './api';
 import type { Shipment, ShipmentStatus } from './types';
 import './index.css';
 
 export default function App() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [drivers, setDrivers] = useState<{driver_id: string, driver_name: string}[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -20,10 +21,11 @@ export default function App() {
   const [filterStatus, setFilterStatus] = useState<ShipmentStatus | 'ALL'>('ALL');
 
   const loadData = async () => {
-    setLoading(true);
     try {
-      const data = await fetchShipments();
+      setLoading(true);
+      const [data, drvData] = await Promise.all([fetchShipments(), fetchDrivers()]);
       setShipments(data);
+      setDrivers(drvData);
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -76,6 +78,10 @@ export default function App() {
       case 'FAILED': return <AlertTriangle size={18} />;
       default: return <Package size={18} />;
     }
+  };
+
+  const getReshippedChild = (shipmentId: string) => {
+    return shipments.find(s => s.reshipOf === shipmentId);
   };
 
   const formatDate = (iso: string) => {
@@ -199,12 +205,20 @@ export default function App() {
                 )}
 
                 {s.status === 'FAILED' && (
-                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
-                    setSelectedShipment(s);
-                    setActionType('reship');
-                  }}>
-                    Reenviar
-                  </button>
+                  <>
+                    {!getReshippedChild(s.shipmentId) ? (
+                      <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
+                        setSelectedShipment(s);
+                        setActionType('reship');
+                      }}>
+                        Reenviar
+                      </button>
+                    ) : (
+                      <div style={{ width: '100%', textAlign: 'center', padding: '8px', color: 'var(--text-secondary)', fontSize: '0.85rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                        Reemplazado por: <strong>{getReshippedChild(s.shipmentId)?.shipmentId.substring(0, 12)}</strong>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -244,14 +258,20 @@ export default function App() {
                   
                   {newStatus === 'ASSIGNED' && (
                     <div className="form-group">
-                      <label>ID del Conductor</label>
-                      <input 
+                      <label>Conductor</label>
+                      <select 
                         className="form-control"
                         required 
-                        placeholder="Ej: DRV-001"
                         value={driverId} 
                         onChange={e => setDriverId(e.target.value)} 
-                      />
+                      >
+                        <option value="">-- Selecciona un conductor --</option>
+                        {drivers.map(d => (
+                          <option key={d.driver_id} value={d.driver_id}>
+                            {d.driver_name} ({d.driver_id})
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   )}
                 </>

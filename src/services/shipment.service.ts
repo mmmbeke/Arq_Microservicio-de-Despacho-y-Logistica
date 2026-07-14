@@ -22,6 +22,7 @@ import {
   saveShipment,
   setIdempotencyEntry,
 } from '../store/shipment.store';
+import { getDriverById } from '../store/driver.store';
 
 function hashPayload(payload: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -202,24 +203,43 @@ export async function patchShipment(
 ): Promise<Shipment> {
   const shipment = await getShipmentOrThrow(shipmentId, correlationId);
   assertIfMatch(shipment, ifMatch, correlationId);
+  const original = await getShipmentOrThrow(shipmentId, correlationId);
+  assertIfMatch(original, ifMatch, correlationId);
 
   if (!body?.status) {
     throw new AppError(400, 'INVALID_REQUEST', 'El campo status es requerido.', correlationId);
   }
 
-  if (body.status === 'ASSIGNED' && !body.driverId?.trim()) {
-    throw new AppError(
-      400,
-      'INVALID_REQUEST',
-      'El campo driverId es requerido al asignar repartidor.',
-      correlationId
-    );
+  let newDriverId = original.driverId;
+  let newDriverName = original.driverName;
+
+  if (body.status === 'ASSIGNED') {
+    if (!body.driverId?.trim()) {
+      throw new AppError(
+        400,
+        'MISSING_DRIVER_ID',
+        'El campo driverId es requerido al asignar repartidor.',
+        correlationId
+      );
+    }
+    const driverInput = body.driverId.trim();
+    const driver = await getDriverById(driverInput);
+    if (!driver) {
+      throw new AppError(
+        400,
+        'INVALID_DRIVER_ID',
+        `El conductor '${driverInput}' no existe en la base de datos. Intenta con DRV-01, DRV-02, etc.`,
+        correlationId
+      );
+    }
+    newDriverId = driverInput;
+    newDriverName = driver.driverName;
   }
 
-  const updated = await applyStatusChange(shipment, body.status, correlationId, {
+  const updated = await applyStatusChange(original, body.status, correlationId, {
     proof: body.proof ?? null,
-    driverId: body.status === 'ASSIGNED' ? body.driverId!.trim() : undefined,
-    driverName: body.driverName?.trim() ?? undefined,
+    driverId: newDriverId,
+    driverName: newDriverName,
   });
   await publishShipmentEvent(updated, correlationId);
   return updated;

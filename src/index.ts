@@ -34,6 +34,12 @@ app.get('/', (_req, res) => {
 
 app.use('/v1/shipments', despachoRouter);
 
+import { getAllDrivers } from './store/driver.store';
+app.get('/v1/drivers', async (_req, res) => {
+  const drivers = await getAllDrivers();
+  res.json(drivers);
+});
+
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 app.get('/docs/openapi.yaml', (_req, res) => {
   res.type('application/yaml').sendFile(openApiPath);

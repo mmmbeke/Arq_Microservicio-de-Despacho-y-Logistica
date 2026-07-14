@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Package, Truck, CheckCircle, AlertTriangle, Play, RefreshCw, X } from 'lucide-react';
-import { fetchShipments, updateShipmentStatus, confirmDelivery, rejectShipment, reshipShipment, fetchDrivers } from './api';
+import { fetchShipments, updateShipmentStatus, confirmDelivery, rejectShipment, fetchDrivers } from './api';
 import type { Shipment, ShipmentStatus } from './types';
 import './index.css';
 
@@ -12,7 +12,7 @@ export default function App() {
   
   // Modal state
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
-  const [actionType, setActionType] = useState<'status' | 'confirm' | 'reject' | 'reship' | null>(null);
+  const [actionType, setActionType] = useState<'status' | 'confirm' | 'reject' | null>(null);
   const [driverId, setDriverId] = useState('');
   const [reason, setReason] = useState('');
   const [signature, setSignature] = useState('');
@@ -52,8 +52,6 @@ export default function App() {
         await confirmDelivery(selectedShipment.shipmentId, signature, selectedShipment.version);
       } else if (actionType === 'reject') {
         await rejectShipment(selectedShipment.shipmentId, reason, selectedShipment.version);
-      } else if (actionType === 'reship') {
-        await reshipShipment(selectedShipment.shipmentId, reason, selectedShipment.version);
       }
       setSelectedShipment(null);
       setActionType(null);
@@ -80,9 +78,6 @@ export default function App() {
     }
   };
 
-  const getReshippedChild = (shipmentId: string) => {
-    return shipments.find(s => s.reshipOf === shipmentId);
-  };
 
   const formatDate = (iso: string) => {
     return new Date(iso).toLocaleString('es-CL', {
@@ -204,22 +199,6 @@ export default function App() {
                   </button>
                 )}
 
-                {s.status === 'FAILED' && (
-                  <>
-                    {!getReshippedChild(s.shipmentId) ? (
-                      <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
-                        setSelectedShipment(s);
-                        setActionType('reship');
-                      }}>
-                        Reenviar
-                      </button>
-                    ) : (
-                      <div style={{ width: '100%', textAlign: 'center', padding: '8px', color: 'var(--text-secondary)', fontSize: '0.85rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
-                        Reemplazado por: <strong>{getReshippedChild(s.shipmentId)?.shipmentId.substring(0, 12)}</strong>
-                      </div>
-                    )}
-                  </>
-                )}
               </div>
             </div>
           )))}
@@ -233,7 +212,7 @@ export default function App() {
               <h2>
                 {actionType === 'status' ? 'Cambiar Estado' : 
                  actionType === 'confirm' ? 'Confirmar Entrega' :
-                 actionType === 'reject' ? 'Rechazar Envío' : 'Reenviar Envío'}
+                 'Rechazar Envío'}
               </h2>
               <button className="close-btn" onClick={() => setSelectedShipment(null)}>
                 <X size={24} />
@@ -290,7 +269,7 @@ export default function App() {
                 </div>
               )}
 
-              {(actionType === 'reject' || actionType === 'reship') && (
+              {actionType === 'reject' && (
                 <div className="form-group">
                   <label>Motivo</label>
                   <input 

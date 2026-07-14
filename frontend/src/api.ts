@@ -9,12 +9,15 @@ export async function fetchShipments(): Promise<Shipment[]> {
   return data.items || [];
 }
 
-export async function updateShipmentStatus(id: string, status: ShipmentStatus, driverId?: string): Promise<Shipment> {
+export async function updateShipmentStatus(id: string, status: ShipmentStatus, version: number, driverId?: string): Promise<Shipment> {
   const payload: any = { status };
   if (driverId) payload.driverId = driverId;
-  const res = await fetch(`${API_URL}/${id}/status`, {
+  const res = await fetch(`${API_URL}/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'If-Match': `"${version}"`
+    },
     body: JSON.stringify(payload)
   });
   if (!res.ok) {

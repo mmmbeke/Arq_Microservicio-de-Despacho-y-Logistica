@@ -44,7 +44,7 @@ export default function App() {
     setSubmitting(true);
     try {
       if (actionType === 'status') {
-        await updateShipmentStatus(selectedShipment.shipmentId, newStatus, driverId || undefined);
+        await updateShipmentStatus(selectedShipment.shipmentId, newStatus, selectedShipment.version, driverId || undefined);
       } else if (actionType === 'confirm') {
         await confirmDelivery(selectedShipment.shipmentId, signature);
       } else if (actionType === 'reject') {

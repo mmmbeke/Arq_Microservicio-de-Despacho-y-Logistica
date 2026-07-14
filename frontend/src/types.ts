@@ -9,6 +9,7 @@ export interface ShipmentLine {
 export interface Address {
   name: string;
   street: string;
+  addressLine1?: string;
   city: string;
   zip: string;
 }
@@ -25,4 +26,5 @@ export interface Shipment {
   createdAt: string;
   updatedAt: string;
   deliveredAt: string | null;
+  version: number;
 }

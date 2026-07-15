@@ -22,7 +22,7 @@ import {
   saveShipment,
   setIdempotencyEntry,
 } from '../store/shipment.store';
-import { getDriverById } from '../store/driver.store';
+import { getDriverById, updateDriverStatus } from '../store/driver.store';
 
 function hashPayload(payload: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -232,8 +232,16 @@ export async function patchShipment(
         correlationId
       );
     }
+    if (driver.status !== 'AVAILABLE') {
+      throw new AppError(
+        400,
+        'DRIVER_UNAVAILABLE',
+        `El conductor '${driverInput}' no está disponible (estado actual: ${driver.status}).`,
+        correlationId
+      );
+    }
     newDriverId = driverInput;
-    newDriverName = driver.driverName;
+    newDriverName = driver.driver_name;
   }
 
   const updated = await applyStatusChange(original, body.status, correlationId, {
@@ -241,6 +249,11 @@ export async function patchShipment(
     driverId: newDriverId,
     driverName: newDriverName,
   });
+  
+  if (body.status === 'ASSIGNED' && newDriverId) {
+    await updateDriverStatus(newDriverId, 'BUSY');
+  }
+  
   await publishShipmentEvent(updated, correlationId);
   return updated;
 }
@@ -283,6 +296,11 @@ export async function confirmShipment(
   const updated = await applyStatusChange(shipment, 'DELIVERED', correlationId, {
     proof: body?.proof ?? null,
   });
+  
+  if (shipment.driverId) {
+    await updateDriverStatus(shipment.driverId, 'AVAILABLE');
+  }
+  
   await setIdempotencyEntry(`confirm:${key}`, payloadHash, shipmentId, 200);
   await publishShipmentEvent(updated, correlationId);
 
@@ -325,6 +343,11 @@ export async function rejectShipment(
   }
 
   const updated = await applyStatusChange(shipment, 'FAILED', correlationId, { proof: null });
+  
+  if (shipment.driverId) {
+    await updateDriverStatus(shipment.driverId, 'AVAILABLE');
+  }
+  
   await setIdempotencyEntry(`reject:${key}`, payloadHash, shipmentId, 200);
   await publishShipmentEvent(updated, correlationId, body?.reason);
 

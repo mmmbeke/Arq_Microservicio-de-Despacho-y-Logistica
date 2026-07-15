@@ -6,12 +6,13 @@ import './index.css';
 
 export default function App() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
-  const [drivers, setDrivers] = useState<{driver_id: string, driver_name: string}[]>([]);
+  const [drivers, setDrivers] = useState<{driver_id: string, driver_name: string, status: string}[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
   // Modal state
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
+  const [viewingShipment, setViewingShipment] = useState<Shipment | null>(null);
   const [actionType, setActionType] = useState<'status' | 'confirm' | 'reject' | null>(null);
   const [driverId, setDriverId] = useState('');
   const [reason, setReason] = useState('');
@@ -140,7 +141,12 @@ export default function App() {
             </div>
           ) : (
             (filterStatus === 'ALL' ? shipments : shipments.filter(s => s.status === filterStatus)).map(s => (
-              <div key={s.shipmentId} className={`card glass status-${s.status}`}>
+              <div 
+                key={s.shipmentId} 
+                className={`card glass status-${s.status}`}
+                onClick={() => setViewingShipment(s)}
+                style={{ cursor: 'pointer' }}
+              >
               <div className="card-header">
                 <div>
                   <div className="card-title" title={`Order ${s.orderId}`}>
@@ -168,7 +174,8 @@ export default function App() {
 
               <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '16px', flexWrap: 'wrap' }}>
                 {['CREATED', 'PICKING', 'ASSIGNED', 'OUT_FOR_DELIVERY'].includes(s.status) && (
-                  <button className="btn" style={{ flex: 1 }} onClick={() => {
+                  <button className="btn" style={{ flex: 1 }} onClick={(e) => {
+                    e.stopPropagation();
                     setSelectedShipment(s);
                     setActionType('status');
                     setNewStatus(
@@ -182,7 +189,8 @@ export default function App() {
                 )}
                 
                 {s.status === 'OUT_FOR_DELIVERY' && (
-                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={(e) => {
+                    e.stopPropagation();
                     setSelectedShipment(s);
                     setActionType('confirm');
                   }}>
@@ -191,7 +199,8 @@ export default function App() {
                 )}
 
                 {!['DELIVERED', 'FAILED'].includes(s.status) && (
-                  <button className="btn" style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }} onClick={() => {
+                  <button className="btn" style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }} onClick={(e) => {
+                    e.stopPropagation();
                     setSelectedShipment(s);
                     setActionType('reject');
                   }}>
@@ -245,7 +254,7 @@ export default function App() {
                         onChange={e => setDriverId(e.target.value)} 
                       >
                         <option value="">-- Selecciona un conductor --</option>
-                        {drivers.map(d => (
+                        {drivers.filter(d => d.status === 'AVAILABLE').map(d => (
                           <option key={d.driver_id} value={d.driver_id}>
                             {d.driver_name} ({d.driver_id})
                           </option>
@@ -291,6 +300,70 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {viewingShipment && (
+        <div className="modal-overlay" onClick={() => setViewingShipment(null)}>
+          <div className="modal-content glass" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+            <div className="modal-header">
+              <h2>Detalles del Pedido</h2>
+              <button className="close-btn" onClick={() => setViewingShipment(null)}>
+                <X size={24} />
+              </button>
+            </div>
+            <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', maxHeight: '70vh', paddingRight: '8px' }}>
+              <div className="detail-row"><strong>ID Envío:</strong> {viewingShipment.shipmentId}</div>
+              <div className="detail-row"><strong>ID Pedido:</strong> {viewingShipment.orderId}</div>
+              <div className="detail-row"><strong>Usuario:</strong> {viewingShipment.userId}</div>
+              <div className="detail-row" style={{ display: 'flex', alignItems: 'center' }}>
+                <strong style={{ marginRight: '8px' }}>Estado:</strong> 
+                <span className={`badge badge-${viewingShipment.status}`} style={{ padding: '2px 8px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  {getStatusIcon(viewingShipment.status)}
+                  {viewingShipment.status}
+                </span>
+              </div>
+              <div className="detail-row"><strong>Conductor Asignado:</strong> {viewingShipment.driverName || viewingShipment.driverId || 'Ninguno'}</div>
+              
+              <div style={{ padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', marginTop: '8px' }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Truck size={16} /> Dirección de Entrega
+                </h3>
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                  <div>{viewingShipment.shipTo?.name}</div>
+                  <div>{viewingShipment.shipTo?.street} {viewingShipment.shipTo?.addressLine1}</div>
+                  <div>{viewingShipment.shipTo?.city}, {viewingShipment.shipTo?.zip}</div>
+                </div>
+              </div>
+
+              <div style={{ padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Package size={16} /> Productos ({viewingShipment.lines?.reduce((acc, l) => acc + l.qty, 0)})
+                </h3>
+                <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                  {viewingShipment.lines?.map((line, idx) => (
+                    <li key={idx}>{line.qty}x {line.description} (SKU: {line.sku})</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '8px' }}>
+                <div><strong>Creado:</strong> {formatDate(viewingShipment.createdAt)}</div>
+                <div><strong>Actualizado:</strong> {formatDate(viewingShipment.updatedAt)}</div>
+                {viewingShipment.deliveredAt && (
+                  <div style={{ gridColumn: '1 / -1' }}><strong>Entregado:</strong> {formatDate(viewingShipment.deliveredAt)}</div>
+                )}
+                {viewingShipment.reshipOf && (
+                  <div style={{ gridColumn: '1 / -1' }}><strong>Reenvío de:</strong> {viewingShipment.reshipOf}</div>
+                )}
+              </div>
+            </div>
+            <div className="modal-actions" style={{ marginTop: '24px' }}>
+              <button type="button" className="btn btn-primary" onClick={() => setViewingShipment(null)} style={{ width: '100%' }}>
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

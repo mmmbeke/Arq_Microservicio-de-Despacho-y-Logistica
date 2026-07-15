@@ -9,7 +9,7 @@ export async function fetchShipments(): Promise<Shipment[]> {
   return data.items || [];
 }
 
-export async function fetchDrivers(): Promise<{driver_id: string, driver_name: string}[]> {
+export async function fetchDrivers(): Promise<{driver_id: string, driver_name: string, status: string}[]> {
   const res = await fetch(`http://localhost:3007/v1/drivers`);
   if (!res.ok) throw new Error('Failed to fetch drivers');
   return res.json();
